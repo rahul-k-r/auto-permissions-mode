@@ -27,7 +27,9 @@ def install_hook(is_global: bool) -> None:
         except Exception:
             current_data = {}
 
-    module_entry = f"python -m auto_permissions.hook_handler"
+    handler_path = Path(__file__).resolve().parent / "hook_handler.py"
+    # Format command with quoted path for cross-platform reliability
+    module_entry = f'python "{handler_path.as_posix()}"'
 
     hook_entry = {
         "enabled": True,
