@@ -1,0 +1,17 @@
+{
+  "auto-permissions-mode": {
+    "enabled": true,
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python -m auto_permissions.hook_handler",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

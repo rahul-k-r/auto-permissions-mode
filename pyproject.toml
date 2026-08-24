@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "auto-permissions"
+version = "0.1.0"
+description = "Autonomous local LLM security gatekeeper and permissions engine for AI coding agents."
+readme = "README.md"
+authors = [{ name = "Rahul" }]
+license = { text = "MIT" }
+requires-python = ">=3.9"
+keywords = ["antigravity", "agy", "permissions", "security", "ollama", "gemma4", "qwen", "ai-agents"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+    "Topic :: Software Development :: Build Tools",
+]
+
+[project.scripts]
+auto-permissions = "auto_permissions.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["auto_permissions*"]

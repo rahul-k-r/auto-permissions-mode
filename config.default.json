@@ -1,0 +1,21 @@
+{
+  "provider": "ollama",
+  "endpoint": "http://localhost:11434/api/generate",
+  "model": "gemma4:12b",
+  "num_ctx": 1024,
+  "temperature": 0.0,
+  "timeout_seconds": 15,
+  "fallback_action": "ask",
+  "fast_path_read_only": true,
+  "strict_mode": false,
+  "protected_paths": [
+    ".git",
+    ".env",
+    ".ssh",
+    "id_rsa",
+    "id_ed25519",
+    "/etc",
+    "C:\\Windows",
+    "C:\\Windows\\System32"
+  ]
+}
