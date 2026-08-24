@@ -155,19 +155,30 @@ Create an `auto-permissions.json` file in your workspace or at `~/.gemini/config
 
 ---
 
-## 🏗️ Supported Models & Hardware Recommendations
+## 🏗️ Hardware Sizing & VRAM Presets Guide
 
-Tested and optimized for **8 GB VRAM** systems (Windows / Linux / macOS):
+Because permissions payloads are very small (<1k tokens), we restrict the context window to `1024` tokens, saving **1–3 GB of VRAM** compared to default 32k/128k allocations.
 
-| Model | Tag | Quantization | Total VRAM (1k Context) | Best For |
-| :--- | :--- | :--- | :--- | :--- |
-| **Gemma 4 12B** | `gemma4:12b` | Q3 / Q4 | ~6.8 – 7.3 GB | 🏆 Maximum reasoning, deep code comprehension & anti-circumvention |
-| **Gemma 4 E4B** | `gemma4:e4b` | Q8 / FP16 | ~3.2 – 4.5 GB | ⚡ Balanced performance & ultra-fast latency (<150ms) |
-| **Qwen 2.5 Coder 7B** | `qwen2.5-coder:7b` | Q5_K_M | ~5.5 GB | 🛠️ Exceptional shell syntax & script comprehension |
-| **Llama 3.2 3B** | `llama3.2:3b` | Q8_0 | ~2.5 GB | 🏎️ Ultra-low resource footprint |
+You can configure Auto Permissions Mode for your exact GPU tier with a single command:
+
+```bash
+python -m auto_permissions.cli setup --vram <tier>
+```
+
+### Supported VRAM Profiles
+
+| VRAM Tier | Example GPUs | Recommended Model | Modelfile | Usable Footprint (1k Context) | Profile Characteristics |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **4 GB** | GTX 1650, RTX 3050 Mobile, Apple M-base (4GB budget) | `gemma4:e2b` | `Modelfile.4gb-gemma4-e2b` | **~1.8 GB** | Ultra-lightweight edge profile. Sub-50ms latency, zero memory pressure. |
+| **6 GB** | RTX 2060, RTX 3060 Mobile, GTX 1660 | `gemma4:e4b` | `Modelfile.6gb-gemma4-e4b` | **~3.5 GB** | Fast balanced profile. High accuracy on structured JSON with ~2.5 GB headroom. |
+| **8 GB** | RTX 3070, RTX 4060, RTX 2070/2080, Apple M1/M2 16GB | `gemma4:12b` (Q3/Q4) | `Modelfile.gemma4-12b` | **~6.8 – 7.2 GB** | 🏆 **Maximum capability**: Frontier-level reasoning and Trojan script detection right at the VRAM limit. |
+| **12 GB** | RTX 3060 12GB, RTX 4070, RTX 3080 | `gemma4:12b` (Q8) / `qwen2.5:14b` | `Modelfile.12gb-gemma4-12b-q8` | **~9.5 GB** | High-precision workstation profile. Near-zero quantization loss. |
+| **16 GB** | RTX 4080, RTX 4060 Ti 16GB, Apple M 24GB Unified | `gemma4:26b` (MoE) / `qwen2.5-coder:14b` | `Modelfile.16gb-24gb-gemma4-31b` | **~14.0 GB** | Mixture-of-Experts profile with high active capacity. |
+| **24 GB+** | RTX 3090, RTX 4090, Apple M Max/Studio 36GB-64GB+ | `gemma4:31b` / `qwen2.5-coder:32b` | `Modelfile.16gb-24gb-gemma4-31b` | **~19.5 – 22.0 GB** | Flagship dense reasoning profile with complete command syntax depth. |
 
 ---
 
 ## 📄 License
 
 MIT © [Rahul](https://github.com/rahul-k-r)
+

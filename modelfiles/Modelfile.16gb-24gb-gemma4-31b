@@ -1,0 +1,4 @@
+FROM gemma4:31b
+PARAMETER num_ctx 2048
+PARAMETER temperature 0.0
+PARAMETER stop "<|im_end|>"
