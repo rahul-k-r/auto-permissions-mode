@@ -37,6 +37,17 @@ def run_hook() -> None:
             "reason": f"Hook error ({str(e)}). Deferring to '{fallback}'."
         }
 
+    try:
+        debug_log = config.get("debug_log", "")
+        if not debug_log:
+            from pathlib import Path
+            debug_log = str(Path.home() / ".gemini" / "hook_debug.log")
+        with open(debug_log, "a", encoding="utf-8") as f:
+            f.write(f"INPUT: {raw_input.strip()}\n")
+            f.write(f"OUTPUT: {json.dumps(result)}\n\n")
+    except Exception:
+        pass
+
     print(json.dumps(result))
 
 if __name__ == "__main__":
