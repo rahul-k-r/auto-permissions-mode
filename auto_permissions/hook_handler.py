@@ -2,6 +2,14 @@
 
 import sys
 import json
+
+# Ensure UTF-8 output on Windows
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from auto_permissions.config import load_config
 from auto_permissions.providers import get_provider
 from auto_permissions.evaluator import SecurityEvaluator
