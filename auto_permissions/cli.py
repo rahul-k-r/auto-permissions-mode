@@ -1,5 +1,6 @@
 """CLI interface for managing and testing Auto Permissions Mode."""
 
+import os
 import sys
 import json
 import argparse
@@ -8,7 +9,7 @@ from pathlib import Path
 # Ensure UTF-8 output on Windows terminals
 if hasattr(sys.stdout, "reconfigure"):
     try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace") # type: ignore
     except Exception:
         pass
 
@@ -38,8 +39,11 @@ def install_hook(is_global: bool) -> None:
             print("Aborting installation to prevent overwriting existing hooks configuration.")
             return
 
-    # Use sys.executable with module entry for reliable cross-platform execution
-    module_entry = f'"{sys.executable}" -m auto_permissions.hook_handler'
+    # Use sys.executable with module entry formatted for Windows cmd.exe /c
+    if " " in sys.executable:
+        module_entry = f'""{sys.executable}" -m auto_permissions.hook_handler"'
+    else:
+        module_entry = f'{sys.executable} -m auto_permissions.hook_handler'
 
     hook_entry = {
         "enabled": True,
@@ -197,40 +201,40 @@ def run_tests() -> None:
 
 VRAM_PROFILES = {
     "4gb": {
-        "model": "gemma4:e2b",
-        "num_ctx": 1024,
+        "model": "gemma-4-E2B-it-UD-Q3_K_XL.gguf",
+        "num_ctx": 8192,
         "modelfile": "Modelfile.4gb-gemma4-e2b",
-        "description": "Ultra-lightweight edge profile (Gemma 4 E2B, ~1.8 GB VRAM)",
+        "description": "Ultra-lightweight edge profile (Gemma 4 E2B, ~2.9 GB VRAM, leaves headroom for OS)",
     },
     "6gb": {
-        "model": "gemma4:e4b",
-        "num_ctx": 1024,
+        "model": "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
+        "num_ctx": 8192,
         "modelfile": "Modelfile.6gb-gemma4-e4b",
-        "description": "Fast balanced profile (Gemma 4 E4B, ~3.5 GB VRAM)",
+        "description": "Ultra-low latency profile (Gemma 4 E4B QAT with MTP, <20ms latency)",
     },
     "8gb": {
-        "model": "gemma4:12b",
-        "num_ctx": 1024,
-        "modelfile": "Modelfile.gemma4-12b",
-        "description": "Maximum capability on 8GB VRAM (Gemma 4 12B Q3/Q4, ~7.0 GB VRAM)",
+        "model": "Qwen3.5-9B-UD-Q4_K_XL.gguf",
+        "num_ctx": 8192,
+        "modelfile": "Modelfile.8gb-qwen3.5-9b",
+        "description": "Sweet spot daily driver (Qwen 3.5 9B, 82.7% LiveCodeBench, top security detection)",
     },
     "12gb": {
-        "model": "gemma4:12b",
-        "num_ctx": 2048,
-        "modelfile": "Modelfile.12gb-gemma4-12b-q8",
-        "description": "High-precision workstation profile (Gemma 4 12B Q8, ~9.5 GB VRAM)",
+        "model": "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf",
+        "num_ctx": 8192,
+        "modelfile": "Modelfile.12gb-gemma4-12b",
+        "description": "Maximum threat reasoning on 12GB cards (Gemma 4 12B QAT with MTP)",
     },
     "16gb": {
-        "model": "gemma4:26b",
-        "num_ctx": 2048,
-        "modelfile": "Modelfile.16gb-24gb-gemma4-31b",
-        "description": "Mixture-of-Experts profile (Gemma 4 26B MoE / 14B Dense, ~14.0 GB VRAM)",
+        "model": "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
+        "num_ctx": 8192,
+        "modelfile": "Modelfile.16gb-gemma4-26b",
+        "description": "Mixture-of-Experts frontier profile (Gemma 4 26B A4B MoE, 4B active speed)",
     },
     "24gb": {
-        "model": "gemma4:31b",
-        "num_ctx": 2048,
-        "modelfile": "Modelfile.16gb-24gb-gemma4-31b",
-        "description": "Flagship dense reasoning profile (Gemma 4 31B, ~20.0 GB VRAM)",
+        "model": "Qwen3.8-35B-UD-Q4_K_XL.gguf",
+        "num_ctx": 8192,
+        "modelfile": "Modelfile.24gb-qwen3.8-35b",
+        "description": "Flagship enterprise dense reasoning profile (Qwen 3.8 35B / Gemma 4 31B)",
     },
 }
 
@@ -262,9 +266,8 @@ def setup_vram_profile(vram_tier: str, is_global: bool = True) -> None:
         json.dump(current_config, f, indent=2)
 
     print(f"✓ Configuration saved to {config_path}")
-    print(f"\n👉 Recommended Ollama command to prepare the model:")
-    print(f"   ollama pull {profile['model']}")
-    print(f"   ollama create gemma4-guard -f ./modelfiles/{profile['modelfile']}\n")
+    print(f"\n👉 Recommended llama.cpp launch command:")
+    print(f"   llama serve -m \"models/{profile['model']}\" -c {profile['num_ctx']} -ngl 99 --flash-attn on\n")
 
 def is_hook_installed(hook_file: Path) -> bool:
     if not hook_file.is_file():
@@ -284,7 +287,11 @@ def show_status() -> None:
 
     print("=== Auto Permissions Mode Status ===")
     print(f"Version            : v{__version__}")
-    print(f"Config loaded from : {config.get('endpoint')} (Model: {config.get('model')})")
+    print(f"Provider           : {config.get('provider', 'llamacpp')}")
+    print(f"Endpoint           : {config.get('endpoint')} (Model: {config.get('model')})")
+    print(f"Cloud Failover     : {'ENABLED (Gemini Flash Lite)' if config.get('fallback_to_cloud', True) else 'DISABLED'}")
+    gemini_key_detected = bool(os.environ.get("GEMINI_API_KEY") or config.get("gemini_api_key") or config.get("api_key"))
+    print(f"Gemini API Key     : {'CONFIGURED (Active)' if gemini_key_detected else 'NOT CONFIGURED (Will prompt via force_ask)'}")
     print(f"Global Hook (~/.gemini/config/hooks.json) : {'INSTALLED' if is_hook_installed(global_hook) else 'NOT INSTALLED'}")
     print(f"Local Hook  (.agents/hooks.json)          : {'INSTALLED' if is_hook_installed(local_hook) else 'NOT INSTALLED'}")
 
