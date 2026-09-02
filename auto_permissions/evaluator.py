@@ -11,7 +11,7 @@ Your job is to evaluate proposed tool executions, allow safe development actions
 
 1. "allow":
    - Safe, standard local development workflows:
-     - Local Git operations: `git add`, `git commit`, `git status`, `git diff`, `git log`, `git branch`, `git checkout`, `git switch`, `git stash`, `git restore`. Always ALLOW local repository staging and commits without user interruption.
+     - Local Git operations: `git add`, `git commit`, `git status`, `git diff`, `git log`, `git branch`, `git checkout`, `git switch`, `git stash`. Always ALLOW local repository staging and commits without user interruption.
      - Building, compiling, running unit tests, formatting code, running linters.
      - Standard package management: `npm install`, `pip install`, `cargo build`, `go test`.
      - Creating or editing standard source code, documentation, and config files without hidden payloads.
@@ -19,7 +19,7 @@ Your job is to evaluate proposed tool executions, allow safe development actions
 2. "ask":
    - Operations that modify remote GitHub repositories, destroy uncommitted data, or require human review:
      - Remote Git repository operations: `git push`, `git push origin <branch>`, `git push --force`. All pushes to remote repositories require explicit user confirmation.
-     - Destructive Git operations: `git reset --hard`, `git clean -fd`.
+     - Destructive or rollback Git operations: `git reset --hard`, `git clean -fd`, `git restore` (reverting uncommitted work across files).
      - Infrastructure teardown: `docker system prune`, dropping database tables, deleting production configs.
 
 3. "deny":
@@ -59,7 +59,6 @@ SAFE_LOCAL_GIT_PREFIXES = (
     "git checkout",
     "git switch",
     "git stash",
-    "git restore",
     "git show",
     "git tag",
 )
@@ -73,6 +72,7 @@ REMOTE_OR_RISKY_GIT_FLAGS = (
     "reset",
     "rebase",
     "remote",
+    "restore",
 )
 
 class SecurityEvaluator:
@@ -100,8 +100,7 @@ class SecurityEvaluator:
                 if not has_risky_flag and any(cmd.startswith(prefix) for prefix in SAFE_LOCAL_GIT_PREFIXES):
                     return {
                         "decision": "allow",
-                        "reason": f"Fast-path: Safe local git operation ({cmd.split()[0]} {cmd.split()[1] if len(cmd.split()) > 1 else ''}).",
-                        "permissionOverrides": [f"command({cmd})"]
+                        "reason": f"Fast-path: Safe local git operation ({cmd.split()[0]} {cmd.split()[1] if len(cmd.split()) > 1 else ''})."
                     }
 
         # Check protected paths explicitly for file write or command operations
@@ -132,22 +131,11 @@ Arguments:
         if decision not in ["allow", "deny", "ask", "force_ask"]:
             decision = self.config.get("fallback_action", "ask")
 
-        result = {
+        # Escalate 'ask' to 'force_ask' to override cached permissions on high-impact actions
+        if decision == "ask":
+            decision = "force_ask"
+
+        return {
             "decision": decision,
             "reason": decision_data.get("reason", "Evaluated by local security model.")
         }
-
-        if decision == "allow":
-            overrides = []
-            if tool_name == "run_command":
-                cmd = tool_args.get("CommandLine", "").strip()
-                if cmd:
-                    overrides.append(f"command({cmd})")
-            elif tool_name in ["write_to_file", "replace_file_content"]:
-                target = tool_args.get("TargetFile", "").strip()
-                if target:
-                    overrides.append(f"file({target})")
-            if overrides:
-                result["permissionOverrides"] = overrides
-
-        return result
