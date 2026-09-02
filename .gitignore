@@ -47,3 +47,15 @@ htmlcov/
 Thumbs.db
 .idea/
 .vscode/
+
+# Local AI Model Weights
+models/*.gguf
+models/*.bin
+*.gguf
+*.bin
+
+# Local User Configurations & Overrides
+auto-permissions.json
+.agents/auto-permissions.json
+.agents/*.log
+
