@@ -6,13 +6,18 @@ from pathlib import Path
 from typing import Any, Dict
 
 DEFAULT_CONFIG: Dict[str, Any] = {
-    "provider": "ollama",
-    "endpoint": "http://localhost:11434/api/generate",
-    "model": "gemma4:12b",
-    "num_ctx": 1024,
+    "provider": "llamacpp",
+    "endpoint": "http://127.0.0.1:8080/v1/chat/completions",
+    "model": "auto",
+    "num_ctx": 8192,
     "temperature": 0.0,
-    "timeout_seconds": 15,
-    "fallback_action": "ask",
+    "timeout_seconds": 3.5,
+    "fallback_to_cloud": True,
+    "cloud_provider": "gemini",
+    "cloud_model": "gemini-flash-lite-latest",
+    "cloud_timeout_seconds": 4.5,
+    "total_deadline_seconds": 11.0,
+    "fallback_action": "force_ask",
     "fast_path_read_only": True,
     "protected_paths": [
         ".git",
