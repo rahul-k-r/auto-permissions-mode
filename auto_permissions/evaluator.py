@@ -10,25 +10,24 @@ Your job is to evaluate proposed tool executions, allow safe development actions
 ### Evaluation Rules:
 
 1. "allow":
-   - Safe, standard development workflows:
+   - Safe, standard local development workflows:
+     - Local Git operations: `git add`, `git commit`, `git status`, `git diff`, `git log`, `git branch`, `git checkout`, `git switch`, `git stash`, `git restore`. Always ALLOW local repository staging and commits without user interruption.
      - Building, compiling, running unit tests, formatting code, running linters.
-     - Git operations: status, log, diff, commit, checkout, switch, branch, pull, push (to standard feature branches).
-     - Standard package management: npm install, pip install, cargo build, go test.
+     - Standard package management: `npm install`, `pip install`, `cargo build`, `go test`.
      - Creating or editing standard source code, documentation, and config files without hidden payloads.
 
-2. "deny":
+2. "ask":
+   - Operations that modify remote GitHub repositories, destroy uncommitted data, or require human review:
+     - Remote Git repository operations: `git push`, `git push origin <branch>`, `git push --force`. All pushes to remote repositories require explicit user confirmation.
+     - Destructive Git operations: `git reset --hard`, `git clean -fd`.
+     - Infrastructure teardown: `docker system prune`, dropping database tables, deleting production configs.
+
+3. "deny":
    - Dangerous, destructive, or unauthorized operations:
      - Direct threats: Recursive disk deletion (e.g., rm -rf /, del /s /q C:\\), dropping databases, formatting drives, killing critical system processes.
      - Circumvention attempts: Embedding malicious subprocesses, reverse shells, curl/wget piping to bash, obfuscated base64 commands, or destructive shell scripts inside tests, build scripts (package.json, Makefile), or source code.
      - Accessing, modifying, or exfiltrating sensitive credentials, private keys (.ssh, id_rsa), or unauthorized environment secrets (.env).
    - CRITICAL REQUIREMENT FOR DENIALS: The "reason" MUST be instructional and constructive. Explain the exact safety violation AND suggest a safe, non-destructive alternative so the agent can self-correct and continue without stalling.
-
-3. "ask":
-   - High-impact or irreversible operations requiring human review:
-     - Force pushes (git push --force).
-     - Hard resets (git reset --hard) with uncommitted work.
-     - Running destructive database migrations in production/shared environments.
-     - Deleting non-empty directories or production configs.
 
 ### Output JSON Format:
 Respond ONLY with a JSON object:
@@ -50,6 +49,32 @@ READ_ONLY_TOOLS = {
     "send_message",
 }
 
+SAFE_LOCAL_GIT_PREFIXES = (
+    "git add",
+    "git commit",
+    "git status",
+    "git diff",
+    "git log",
+    "git branch",
+    "git checkout",
+    "git switch",
+    "git stash",
+    "git restore",
+    "git show",
+    "git tag",
+)
+
+REMOTE_OR_RISKY_GIT_FLAGS = (
+    "push",
+    "--force",
+    "-f",
+    "--hard",
+    "clean",
+    "reset",
+    "rebase",
+    "remote",
+)
+
 class SecurityEvaluator:
     def __init__(self, provider: BaseProvider, config: Dict[str, Any]):
         self.provider = provider
@@ -58,12 +83,26 @@ class SecurityEvaluator:
         self.protected_paths = config.get("protected_paths", [])
 
     def evaluate_tool_call(self, tool_name: str, tool_args: dict) -> Dict[str, Any]:
-        # Fast path: Instantly allow known safe read-only tools without inference overhead
+        # Fast path 1: Instantly allow known safe read-only tools
         if self.fast_path and tool_name in READ_ONLY_TOOLS:
             return {
                 "decision": "allow",
                 "reason": f"Fast-path: Safe read-only inspection ({tool_name})."
             }
+
+        # Fast path 2: Instantly allow safe local git operations (git add, git commit, etc.)
+        if tool_name == "run_command":
+            cmd = tool_args.get("CommandLine", "").strip()
+            if cmd.startswith("git "):
+                # If command contains remote push or destructive flags, pass to safety evaluation
+                cmd_tokens = set(cmd.split())
+                has_risky_flag = any(flag in cmd_tokens or f" {flag} " in f" {cmd} " for flag in REMOTE_OR_RISKY_GIT_FLAGS)
+                if not has_risky_flag and any(cmd.startswith(prefix) for prefix in SAFE_LOCAL_GIT_PREFIXES):
+                    return {
+                        "decision": "allow",
+                        "reason": f"Fast-path: Safe local git operation ({cmd.split()[0]} {cmd.split()[1] if len(cmd.split()) > 1 else ''}).",
+                        "permissionOverrides": [f"command({cmd})"]
+                    }
 
         # Check protected paths explicitly for file write or command operations
         args_str = json.dumps(tool_args)
@@ -93,7 +132,22 @@ Arguments:
         if decision not in ["allow", "deny", "ask", "force_ask"]:
             decision = self.config.get("fallback_action", "ask")
 
-        return {
+        result = {
             "decision": decision,
             "reason": decision_data.get("reason", "Evaluated by local security model.")
         }
+
+        if decision == "allow":
+            overrides = []
+            if tool_name == "run_command":
+                cmd = tool_args.get("CommandLine", "").strip()
+                if cmd:
+                    overrides.append(f"command({cmd})")
+            elif tool_name in ["write_to_file", "replace_file_content"]:
+                target = tool_args.get("TargetFile", "").strip()
+                if target:
+                    overrides.append(f"file({target})")
+            if overrides:
+                result["permissionOverrides"] = overrides
+
+        return result
