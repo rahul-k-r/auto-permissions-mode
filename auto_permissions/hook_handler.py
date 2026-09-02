@@ -19,11 +19,12 @@ def run_hook() -> None:
     if not raw_input.strip():
         return
 
-    config = load_config()
-    provider = get_provider(config)
-    evaluator = SecurityEvaluator(provider, config)
-
+    config = {}
     try:
+        config = load_config()
+        provider = get_provider(config)
+        evaluator = SecurityEvaluator(provider, config)
+
         data = json.loads(raw_input)
         tool_call = data.get("toolCall", {})
         tool_name = tool_call.get("name", "")
@@ -38,7 +39,7 @@ def run_hook() -> None:
 
         result = evaluator.evaluate_tool_call(tool_name, tool_args, context=context)
     except Exception as e:
-        fallback = config.get("fallback_action", "ask")
+        fallback = config.get("fallback_action", "ask") if isinstance(config, dict) else "ask"
         if fallback == "ask":
             fallback = "force_ask"
         result = {
