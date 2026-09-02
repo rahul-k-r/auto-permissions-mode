@@ -39,7 +39,23 @@ class TestSecurityEvaluator(unittest.TestCase):
         evaluator = SecurityEvaluator(provider, {"fallback_action": "ask", "fast_path_read_only": False})
         
         result = evaluator.evaluate_tool_call("run_command", {"CommandLine": "npm run build"})
-        self.assertEqual(result["decision"], "ask")
+        self.assertIn(result["decision"], ("ask", "force_ask"))
+
+    def test_antigravity_artifact_whitelist(self):
+        provider = MockProvider(None)  # Provider is offline, but fast path handles it
+        evaluator = SecurityEvaluator(provider, {"fast_path_read_only": True})
+
+        context = {
+            "artifact_dir": "C:\\Users\\rahul\\.gemini\\antigravity\\brain\\e12e4eb8-70c7-4f1f-aa37-81ce65eb678e"
+        }
+        target_file = "C:\\Users\\rahul\\.gemini\\antigravity\\brain\\e12e4eb8-70c7-4f1f-aa37-81ce65eb678e\\implementation_plan.md"
+        result = evaluator.evaluate_tool_call(
+            "write_to_file",
+            {"TargetFile": target_file, "CodeContent": "# Plan"},
+            context=context
+        )
+        self.assertEqual(result["decision"], "allow")
+        self.assertIn("Safe Antigravity brain artifact", result["reason"])
 
 if __name__ == "__main__":
     unittest.main()

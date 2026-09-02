@@ -6,7 +6,7 @@ import json
 # Ensure UTF-8 output on Windows
 if hasattr(sys.stdout, "reconfigure"):
     try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace") # type: ignore
     except Exception:
         pass
 
@@ -29,7 +29,14 @@ def run_hook() -> None:
         tool_name = tool_call.get("name", "")
         tool_args = tool_call.get("args", {})
 
-        result = evaluator.evaluate_tool_call(tool_name, tool_args)
+        context = {
+            "workspace_paths": data.get("workspacePaths", []),
+            "artifact_dir": data.get("artifactDirectoryPath", ""),
+            "conversation_id": data.get("conversationId", ""),
+            "transcript_path": data.get("transcriptPath", ""),
+        }
+
+        result = evaluator.evaluate_tool_call(tool_name, tool_args, context=context)
     except Exception as e:
         fallback = config.get("fallback_action", "ask")
         if fallback == "ask":

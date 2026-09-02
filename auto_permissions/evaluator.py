@@ -46,7 +46,8 @@ Respond ONLY with a JSON object:
 
 import json
 import shlex
-from typing import Any, Dict
+from pathlib import Path
+from typing import Any, Dict, Optional
 from auto_permissions.providers import BaseProvider
 
 READ_ONLY_TOOLS = {
@@ -97,7 +98,30 @@ class SecurityEvaluator:
         self.fast_path = config.get("fast_path_read_only", True)
         self.protected_paths = config.get("protected_paths", [])
 
-    def evaluate_tool_call(self, tool_name: str, tool_args: dict) -> Dict[str, Any]:
+    def evaluate_tool_call(self, tool_name: str, tool_args: dict, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        # Fast path 0: Always allow legitimate Antigravity internal brain artifacts
+        target_file = tool_args.get("TargetFile") or tool_args.get("AbsolutePath") or tool_args.get("TargetDirectory") or ""
+        if target_file and any(w in tool_name for w in ("write", "replace", "view")):
+            artifact_dir = (context or {}).get("artifact_dir") or ""
+            if artifact_dir:
+                try:
+                    norm_target = Path(target_file).resolve()
+                    norm_artifact = Path(artifact_dir).resolve()
+                    if norm_target == norm_artifact or norm_target.is_relative_to(norm_artifact):
+                        return {
+                            "decision": "allow",
+                            "reason": f"Fast-path: Safe Antigravity brain artifact modification ({norm_target.name})."
+                        }
+                except Exception:
+                    pass
+
+            norm_target_str = str(Path(target_file)).replace("\\", "/").lower()
+            if "/.gemini/antigravity/brain/" in norm_target_str or "/.gemini/antigravity/artifacts/" in norm_target_str:
+                return {
+                    "decision": "allow",
+                    "reason": f"Fast-path: Safe Antigravity brain artifact directory ({Path(target_file).name})."
+                }
+
         # Fast path 1: Instantly allow known safe read-only tools
         if self.fast_path and tool_name in READ_ONLY_TOOLS:
             return {
