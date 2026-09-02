@@ -37,16 +37,18 @@ Respond ONLY with a JSON object:
 }
 """
 
+import json
+import shlex
+from typing import Any, Dict
+from auto_permissions.providers import BaseProvider
+
 READ_ONLY_TOOLS = {
     "view_file",
     "list_dir",
     "find_by_name",
     "grep_search",
     "read_url_content",
-    "schedule",
-    "manage_task",
-    "manage_subagents",
-    "send_message",
+    "search_web",
 }
 
 SAFE_LOCAL_GIT_PREFIXES = (
@@ -67,13 +69,19 @@ REMOTE_OR_RISKY_GIT_FLAGS = (
     "push",
     "--force",
     "-f",
+    "-D",
+    "--delete",
     "--hard",
     "clean",
     "reset",
     "rebase",
     "remote",
     "restore",
+    "clear",
+    "drop",
 )
+
+SHELL_METACHARS = set(";&|`$><\n\r()")
 
 class SecurityEvaluator:
     def __init__(self, provider: BaseProvider, config: Dict[str, Any]):
@@ -90,30 +98,46 @@ class SecurityEvaluator:
                 "reason": f"Fast-path: Safe read-only inspection ({tool_name})."
             }
 
+        # Safe task inspection (manage_task with list/status only)
+        if self.fast_path and tool_name == "manage_task":
+            action = str(tool_args.get("Action", "")).lower()
+            if action in ("list", "status"):
+                return {
+                    "decision": "allow",
+                    "reason": f"Fast-path: Safe task status inspection ({action})."
+                }
+
         # Fast path 2: Instantly allow safe local git operations (git add, git commit, etc.)
         if tool_name == "run_command":
-            cmd = tool_args.get("CommandLine", "").strip()
-            if cmd.startswith("git "):
-                # If command contains remote push or destructive flags, pass to safety evaluation
-                cmd_tokens = set(cmd.split())
-                has_risky_flag = any(flag in cmd_tokens or f" {flag} " in f" {cmd} " for flag in REMOTE_OR_RISKY_GIT_FLAGS)
-                if not has_risky_flag and any(cmd.startswith(prefix) for prefix in SAFE_LOCAL_GIT_PREFIXES):
-                    return {
-                        "decision": "allow",
-                        "reason": f"Fast-path: Safe local git operation ({cmd.split()[0]} {cmd.split()[1] if len(cmd.split()) > 1 else ''})."
-                    }
+            cmd = (tool_args.get("CommandLine") or "").strip()
+            # Disallow command chaining, subshells, and redirection from bypassing LLM
+            if cmd.startswith("git ") and not any(ch in cmd for ch in SHELL_METACHARS):
+                try:
+                    tokens = shlex.split(cmd)
+                except Exception:
+                    tokens = cmd.split()
+
+                if tokens and tokens[0] == "git":
+                    cmd_tokens_set = set(tokens)
+                    has_risky_flag = any(flag in cmd_tokens_set for flag in REMOTE_OR_RISKY_GIT_FLAGS)
+                    # Block destructive checkout (. or --) from fast-path
+                    is_destructive_checkout = "checkout" in tokens and any(t in tokens for t in (".", "--"))
+                    if not has_risky_flag and not is_destructive_checkout and any(cmd.startswith(prefix) for prefix in SAFE_LOCAL_GIT_PREFIXES):
+                        return {
+                            "decision": "allow",
+                            "reason": f"Fast-path: Safe local git operation ({tokens[0]} {tokens[1] if len(tokens) > 1 else ''})."
+                        }
 
         # Check protected paths explicitly for file write or command operations
         args_str = json.dumps(tool_args)
+        warning_banner = ""
         for protected in self.protected_paths:
             if protected in args_str and any(w in tool_name for w in ["write", "replace", "command"]):
-                # Allow user prompt for protected path access
                 if "read" not in tool_name.lower():
-                    prompt = f"Proposed Action: {tool_name}\nArguments: {json.dumps(tool_args, indent=2)}"
-                    # Let the model review with extra warning context
+                    warning_banner = f"\n⚠️ WARNING: Proposed action touches protected sensitive path: '{protected}'. Require strict safety review.\n"
                     break
 
-        user_prompt = f"""Evaluate this tool execution:
+        user_prompt = f"""Evaluate this tool execution:{warning_banner}
 Tool: {tool_name}
 Arguments:
 {json.dumps(tool_args, indent=2)}"""
@@ -122,12 +146,14 @@ Arguments:
 
         if not decision_data or not isinstance(decision_data, dict):
             fallback = self.config.get("fallback_action", "ask")
+            if fallback == "ask":
+                fallback = "force_ask"
             return {
                 "decision": fallback,
                 "reason": f"Security model unavailable or invalid response. Fallback to '{fallback}'."
             }
 
-        decision = decision_data.get("decision", "").lower()
+        decision = str(decision_data.get("decision", "")).strip().lower()
         if decision not in ["allow", "deny", "ask", "force_ask"]:
             decision = self.config.get("fallback_action", "ask")
 

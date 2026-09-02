@@ -2,13 +2,43 @@
 import json
 import re
 import urllib.request
-import urllib.error
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
+
+def parse_json_safely(raw_text: str) -> Optional[Dict[str, Any]]:
+    """Sanitize <think> tags and extract valid JSON payload reliably."""
+    if not raw_text or not raw_text.strip():
+        return None
+
+    # 1. Strip completed or unclosed <think> blocks
+    cleaned = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL)
+    cleaned = re.sub(r'<think>.*$', '', cleaned, flags=re.DOTALL).strip()
+
+    # 2. Try direct parse
+    try:
+        parsed = json.loads(cleaned)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+
+    # 3. Locate the first '{' and decode using JSONDecoder.raw_decode
+    idx = cleaned.find('{')
+    if idx != -1:
+        try:
+            obj, _ = json.JSONDecoder().raw_decode(cleaned[idx:])
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+
+    return None
+
 class BaseProvider(ABC):
     @abstractmethod
     def evaluate(self, system_prompt: str, prompt: str) -> Optional[Dict[str, Any]]:
         pass
+
 class OllamaProvider(BaseProvider):
     def __init__(self, endpoint: str, model: str, num_ctx: int = 1024, temperature: float = 0.0, timeout: int = 15):
         self.endpoint = endpoint
@@ -16,6 +46,7 @@ class OllamaProvider(BaseProvider):
         self.num_ctx = num_ctx
         self.temperature = temperature
         self.timeout = timeout
+
     def evaluate(self, system_prompt: str, prompt: str) -> Optional[Dict[str, Any]]:
         full_prompt = f"{system_prompt}\n\n{prompt}"
         payload = {
@@ -37,15 +68,17 @@ class OllamaProvider(BaseProvider):
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 response_text = data.get("response", "")
-                return json.loads(response_text)
+                return parse_json_safely(response_text)
         except Exception:
             return None
+
 class OpenAICompatibleProvider(BaseProvider):
     def __init__(self, endpoint: str, model: str, temperature: float = 0.0, timeout: int = 15):
         self.endpoint = endpoint
         self.model = model
         self.temperature = temperature
         self.timeout = timeout
+
     def evaluate(self, system_prompt: str, prompt: str) -> Optional[Dict[str, Any]]:
         payload = {
             "model": self.model,
@@ -53,6 +86,7 @@ class OpenAICompatibleProvider(BaseProvider):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
+            "response_format": {"type": "json_object"},
             "chat_template_kwargs": {"enable_thinking": False},
             "temperature": self.temperature,
         }
@@ -64,15 +98,10 @@ class OpenAICompatibleProvider(BaseProvider):
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                choice = data.get("choices", [{}])[0]
+                choices = data.get("choices", [])
+                choice = choices[0] if choices else {}
                 content = choice.get("message", {}).get("content", "")
-                if not content:
-                    return None
-                clean_content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
-                json_match = re.search(r'\{.*\}', clean_content, flags=re.DOTALL)
-                if json_match:
-                    clean_content = json_match.group(0)
-                return json.loads(clean_content)
+                return parse_json_safely(content)
         except Exception:
             return None
 def get_provider(config: Dict[str, Any]) -> BaseProvider:

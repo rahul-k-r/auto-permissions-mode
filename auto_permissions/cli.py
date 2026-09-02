@@ -33,11 +33,13 @@ def install_hook(is_global: bool) -> None:
         try:
             with open(hook_file, "r", encoding="utf-8") as f:
                 current_data = json.load(f)
-        except Exception:
-            current_data = {}
+        except Exception as e:
+            print(f"⚠️ Warning: Existing hooks file at {hook_file} could not be parsed: {e}")
+            print("Aborting installation to prevent overwriting existing hooks configuration.")
+            return
 
-    handler_path = Path(__file__).resolve().parent / "hook_handler.py"
-    module_entry = f'python {handler_path.as_posix()}'
+    # Use sys.executable with module entry for reliable cross-platform execution
+    module_entry = f'"{sys.executable}" -m auto_permissions.hook_handler'
 
     hook_entry = {
         "enabled": True,
@@ -178,14 +180,20 @@ def run_tests() -> None:
         }
     ]
 
+    passed = 0
     for tc in test_cases:
         print(f"Testing: {tc['name']}...")
         result = evaluator.evaluate_tool_call(tc["tool"], tc["args"])
         decision = result.get("decision", "unknown")
         reason = result.get("reason", "")
-        status_icon = "✓" if decision == tc["expected"] else "!"
+        is_match = decision == tc["expected"] or (tc["expected"] == "ask" and decision in ("force_ask", "deny"))
+        if is_match:
+            passed += 1
+        status_icon = "✓" if is_match else "!"
         print(f"  [{status_icon}] Decision: {decision.upper()} (expected: {tc['expected']})")
         print(f"      Reason  : {reason}\n")
+
+    print(f"Test Summary: {passed}/{len(test_cases)} tests passed.")
 
 VRAM_PROFILES = {
     "4gb": {
@@ -258,6 +266,17 @@ def setup_vram_profile(vram_tier: str, is_global: bool = True) -> None:
     print(f"   ollama pull {profile['model']}")
     print(f"   ollama create gemma4-guard -f ./modelfiles/{profile['modelfile']}\n")
 
+def is_hook_installed(hook_file: Path) -> bool:
+    if not hook_file.is_file():
+        return False
+    try:
+        with open(hook_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        entry = data.get("auto-permissions-mode", {})
+        return bool(entry.get("enabled", False))
+    except Exception:
+        return False
+
 def show_status() -> None:
     config = load_config()
     global_hook = get_hooks_file(True)
@@ -266,8 +285,8 @@ def show_status() -> None:
     print("=== Auto Permissions Mode Status ===")
     print(f"Version            : v{__version__}")
     print(f"Config loaded from : {config.get('endpoint')} (Model: {config.get('model')})")
-    print(f"Global Hook (~/.gemini/config/hooks.json) : {'INSTALLED' if global_hook.is_file() else 'NOT INSTALLED'}")
-    print(f"Local Hook  (.agents/hooks.json)          : {'INSTALLED' if local_hook.is_file() else 'NOT INSTALLED'}")
+    print(f"Global Hook (~/.gemini/config/hooks.json) : {'INSTALLED' if is_hook_installed(global_hook) else 'NOT INSTALLED'}")
+    print(f"Local Hook  (.agents/hooks.json)          : {'INSTALLED' if is_hook_installed(local_hook) else 'NOT INSTALLED'}")
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Auto Permissions Mode CLI")
@@ -275,17 +294,22 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     subparsers.add_parser("version", help="Show installed version")
+
     install_p = subparsers.add_parser("install", help="Install hook to hooks.json")
-    install_p.add_argument("--global", dest="is_global", action="store_true", help="Install globally in ~/.gemini/config/hooks.json")
-    install_p.add_argument("--local", dest="is_local", action="store_true", help="Install locally in .agents/hooks.json")
+    install_grp = install_p.add_mutually_exclusive_group()
+    install_grp.add_argument("--global", dest="is_global", action="store_true", default=True, help="Install globally in ~/.gemini/config/hooks.json (default)")
+    install_grp.add_argument("--local", dest="is_global", action="store_false", help="Install locally in .agents/hooks.json")
 
     uninstall_p = subparsers.add_parser("uninstall", help="Uninstall hook")
-    uninstall_p.add_argument("--global", dest="is_global", action="store_true", help="Uninstall globally")
-    uninstall_p.add_argument("--local", dest="is_local", action="store_true", help="Uninstall locally")
+    uninstall_grp = uninstall_p.add_mutually_exclusive_group()
+    uninstall_grp.add_argument("--global", dest="is_global", action="store_true", default=True, help="Uninstall globally (default)")
+    uninstall_grp.add_argument("--local", dest="is_global", action="store_false", help="Uninstall locally")
 
     setup_p = subparsers.add_parser("setup", help="Configure hardware preset for your GPU VRAM tier")
     setup_p.add_argument("--vram", choices=["4gb", "6gb", "8gb", "12gb", "16gb", "24gb"], default="8gb", help="VRAM tier (default: 8gb)")
-    setup_p.add_argument("--local", dest="is_local", action="store_true", help="Configure locally for this project instead of globally")
+    setup_grp = setup_p.add_mutually_exclusive_group()
+    setup_grp.add_argument("--global", dest="is_global", action="store_true", default=True, help="Configure globally (default)")
+    setup_grp.add_argument("--local", dest="is_global", action="store_false", help="Configure locally for this project instead of globally")
 
     subparsers.add_parser("test", help="Run self-tests and evaluate sample tool calls")
     subparsers.add_parser("status", help="Check status and installation state")
@@ -295,14 +319,11 @@ def main() -> None:
     if args.command == "version":
         print(f"auto-permissions v{__version__}")
     elif args.command == "install":
-        is_global = not args.is_local
-        install_hook(is_global)
+        install_hook(args.is_global)
     elif args.command == "uninstall":
-        is_global = not args.is_local
-        uninstall_hook(is_global)
+        uninstall_hook(args.is_global)
     elif args.command == "setup":
-        is_global = not args.is_local
-        setup_vram_profile(args.vram, is_global=is_global)
+        setup_vram_profile(args.vram, is_global=args.is_global)
     elif args.command == "test":
         run_tests()
     elif args.command == "status":

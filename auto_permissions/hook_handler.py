@@ -32,21 +32,22 @@ def run_hook() -> None:
         result = evaluator.evaluate_tool_call(tool_name, tool_args)
     except Exception as e:
         fallback = config.get("fallback_action", "ask")
+        if fallback == "ask":
+            fallback = "force_ask"
         result = {
             "decision": fallback,
             "reason": f"Hook error ({str(e)}). Deferring to '{fallback}'."
         }
 
-    try:
-        debug_log = config.get("debug_log", "")
-        if not debug_log:
-            from pathlib import Path
-            debug_log = str(Path.home() / ".gemini" / "hook_debug.log")
-        with open(debug_log, "a", encoding="utf-8") as f:
-            f.write(f"INPUT: {raw_input.strip()}\n")
-            f.write(f"OUTPUT: {json.dumps(result)}\n\n")
-    except Exception:
-        pass
+    # Only log debug output if explicitly configured
+    debug_log = config.get("debug_log")
+    if debug_log:
+        try:
+            with open(debug_log, "a", encoding="utf-8") as f:
+                f.write(f"INPUT: {raw_input.strip()}\n")
+                f.write(f"OUTPUT: {json.dumps(result)}\n\n")
+        except Exception:
+            pass
 
     print(json.dumps(result))
 
