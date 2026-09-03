@@ -88,8 +88,11 @@ class OpenAICompatibleProvider(BaseProvider):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
+            "max_tokens": 300,
             "temperature": self.temperature,
             "response_format": {"type": "json_object"},
+            "chat_template_kwargs": {"enable_thinking": False},
+            "reasoning_effort": "none",
         }
         data = json.dumps(payload).encode("utf-8")
 

@@ -31,6 +31,14 @@ def parse_json_safely(raw_text: str) -> Optional[Dict[str, Any]]:
         except Exception:
             pass
 
+    # 4. Resilient regex extraction for truncated JSON (e.g. hit max_tokens mid-reason)
+    m = re.search(r'"decision"\s*:\s*"(allow|deny|ask|force_ask)"', cleaned, re.IGNORECASE)
+    if m:
+        dec = m.group(1).lower()
+        rm = re.search(r'"reason"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)', cleaned)
+        reason = rm.group(1).strip() if rm else "Evaluated by security model."
+        return {"decision": dec, "reason": reason}
+
     return None
 
 class BaseProvider(ABC):

@@ -16,7 +16,7 @@ class TieredProvider(BaseProvider):
         self,
         primary: BaseProvider,
         secondary: Optional[BaseProvider] = None,
-        total_deadline: float = 11.0,
+        total_deadline: float = 15.0,
     ):
         self.primary = primary
         self.secondary = secondary
@@ -24,6 +24,11 @@ class TieredProvider(BaseProvider):
 
     def evaluate(self, system_prompt: str, prompt: str) -> Optional[Dict[str, Any]]:
         t0 = time.time()
+
+        # Clamp primary local timeout to at most 6.0s so cloud always has guaranteed budget
+        if hasattr(self.primary, "timeout"):
+            orig_prim_timeout = getattr(self.primary, "timeout", 6.0)
+            setattr(self.primary, "timeout", min(orig_prim_timeout, 6.0))
 
         # 1. Try Primary (Local Server)
         res = self.primary.evaluate(system_prompt, prompt)
@@ -37,7 +42,7 @@ class TieredProvider(BaseProvider):
         # 2. Check remaining budget
         elapsed = time.time() - t0
         remaining = self.total_deadline - elapsed
-        if remaining < 2.0:
+        if remaining < 1.0:
             return {
                 "decision": "force_ask",
                 "reason": f"Local server offline and deadline budget expired ({elapsed:.1f}s elapsed). Escalating to manual confirmation."
@@ -46,7 +51,7 @@ class TieredProvider(BaseProvider):
         # 3. Failover to Cloud Secondary
         if hasattr(self.secondary, "timeout"):
             orig_timeout = getattr(self.secondary, "timeout", 4.5)
-            setattr(self.secondary, "timeout", min(orig_timeout, remaining))
+            setattr(self.secondary, "timeout", min(orig_timeout, max(1.0, remaining - 0.2)))
 
         res_cloud = self.secondary.evaluate(system_prompt, prompt)
         if res_cloud and isinstance(res_cloud, dict):

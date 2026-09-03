@@ -54,7 +54,7 @@ def get_provider(config: Dict[str, Any]) -> BaseProvider:
     # Check for cloud failover
     if config.get("fallback_to_cloud", True):
         cloud_provider_name = config.get("cloud_provider", "gemini").lower()
-        cloud_timeout = float(config.get("cloud_timeout_seconds", 4.5))
+        cloud_timeout = float(config.get("cloud_timeout_seconds", 12.0))
         cloud_model = config.get("cloud_model", "")
 
         secondary: BaseProvider
@@ -101,7 +101,7 @@ def get_provider(config: Dict[str, Any]) -> BaseProvider:
                 timeout=cloud_timeout,
             )
 
-        total_deadline = float(config.get("total_deadline_seconds", 11.0))
+        total_deadline = float(config.get("total_deadline_seconds", 18.0))
         return TieredProvider(primary, secondary, total_deadline=total_deadline)
 
     return primary

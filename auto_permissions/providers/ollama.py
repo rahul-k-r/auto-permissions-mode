@@ -34,6 +34,7 @@ class OllamaProvider(BaseProvider):
             "stream": False,
             "options": {
                 "num_ctx": self.num_ctx,
+                "num_predict": 160,
                 "temperature": self.temperature,
             }
         }

@@ -44,10 +44,10 @@ Your job is to evaluate proposed tool executions, allow safe development actions
    - Legitimate software engineering edits (refactors, configuration updates, bugfixes, test updates) should be allowed unless they literally contain real destructive threats or credentials exfiltration.
 
 ### Output JSON Format:
-Respond ONLY with a JSON object:
+Respond ONLY with a single compact JSON object (no markdown, no prelude, no thinking tokens):
 {
   "decision": "allow" | "deny" | "ask",
-  "reason": "<Concise explanation + safe alternative if denied>"
+  "reason": "<Concise explanation under 2 sentences. If denied, include safe alternative.>"
 }
 """
 
