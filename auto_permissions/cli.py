@@ -267,7 +267,7 @@ def setup_vram_profile(vram_tier: str, is_global: bool = True) -> None:
 
     print(f"✓ Configuration saved to {config_path}")
     print(f"\n👉 Recommended llama.cpp launch command:")
-    print(f"   llama serve -m \"models/{profile['model']}\" -c {profile['num_ctx']} -ngl 99 --flash-attn on\n")
+    print(f"   llama serve -m \"models/{profile['model']}\" -c {profile['num_ctx']} -ctk q4_0 -ctv q4_0 -ngl 99 --flash-attn on\n")
 
 def is_hook_installed(hook_file: Path) -> bool:
     if not hook_file.is_file():
