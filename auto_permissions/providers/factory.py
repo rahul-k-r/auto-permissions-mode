@@ -20,9 +20,15 @@ def get_provider(config: Dict[str, Any]) -> BaseProvider:
 
     # Construct primary provider
     if provider_name in ("llamacpp", "openai") or "v1/chat/completions" in endpoint:
+        primary_api_key = (
+            config.get("openai_api_key")
+            or config.get("api_key")
+            or os.environ.get("OPENAI_API_KEY")
+        )
         primary = OpenAICompatibleProvider(
             endpoint=endpoint,
             model=model,
+            api_key=primary_api_key,
             temperature=temperature,
             timeout=timeout,
         )

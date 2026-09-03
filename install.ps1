@@ -25,8 +25,14 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Enforce TLS 1.2 / 1.3 for secure downloads
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+# Enforce strongest available TLS. Tls13 is not a defined enum member on older
+# .NET/PowerShell hosts and would abort the whole script under $ErrorActionPreference
+# = "Stop", so fall back to Tls12-only rather than failing the install outright.
+try {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
+} catch {
+    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+}
 
 function Write-Step { param([string]$msg) Write-Host "`n👉 $msg" -ForegroundColor Cyan }
 function Write-Success { param([string]$msg) Write-Host "✓ $msg" -ForegroundColor Green }
@@ -231,6 +237,10 @@ if (-not $NonInteractive) {
 # -------------------------------------------------------------
 Write-Step "Registering Antigravity PreToolUse hook..."
 & "$venvPython" -m auto_permissions.cli install --global
+if ($LASTEXITCODE -ne 0) {
+    Write-Err "Hook registration failed with exit code $LASTEXITCODE"
+    exit 1
+}
 
 Write-Step "Testing hook bridge integrity..."
 & "$venvPython" -m auto_permissions.cli verify

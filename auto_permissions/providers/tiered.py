@@ -1,13 +1,11 @@
 """Tiered provider coordinator for local-first execution with cloud failover."""
 import hashlib
-import json
-import os
 import time
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .base import BaseProvider
+from .base import BaseProvider, is_in_ttl_cooldown, write_ttl_cooldown
 
 class TieredProvider(BaseProvider):
     """Local-first provider with dynamic deadline budgeting, circuit breaker, and cloud failover.
@@ -35,41 +33,17 @@ class TieredProvider(BaseProvider):
         key = hashlib.sha256(str(key_src).encode("utf-8")).hexdigest()[:12]
         return Path(tempfile.gettempdir()) / f"auto_permissions_cb_{key}.json"
 
-    @staticmethod
-    def _atomic_write_json(path: Path, data: dict) -> None:
-        tmp = path.parent / f"{path.name}.{os.getpid()}.tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f)
-        os.replace(tmp, path)
-
     def is_local_in_cooldown(self) -> bool:
         """Check if local server is marked as down (30s TTL)."""
-        cb_file = self._circuit_breaker_file()
-        if not cb_file.is_file():
-            return False
-        try:
-            with open(cb_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            until = data.get("down_until", 0)
-            return time.time() < until
-        except Exception:
-            return False
+        return is_in_ttl_cooldown(self._circuit_breaker_file(), key="down_until")
 
     def mark_local_down(self, duration: float = 30.0) -> None:
         """Mark local server down for duration seconds."""
-        cb_file = self._circuit_breaker_file()
-        try:
-            self._atomic_write_json(cb_file, {"down_until": time.time() + duration})
-        except Exception:
-            pass
+        write_ttl_cooldown(self._circuit_breaker_file(), duration, key="down_until")
 
     def mark_local_healthy(self) -> None:
         """Clear circuit breaker when local server succeeds."""
-        cb_file = self._circuit_breaker_file()
-        try:
-            self._atomic_write_json(cb_file, {"down_until": 0})
-        except Exception:
-            pass
+        write_ttl_cooldown(self._circuit_breaker_file(), 0, key="down_until")
 
     def evaluate(self, system_prompt: str, prompt: str) -> Optional[Dict[str, Any]]:
         t0 = time.time()
@@ -86,7 +60,12 @@ class TieredProvider(BaseProvider):
             res = self.primary.evaluate(system_prompt, prompt)
             if res and isinstance(res, dict):
                 self.mark_local_healthy()
-                res.setdefault("source", "LOCAL")
+                # A "primary" provider isn't always local (e.g. an OpenAI-compatible
+                # provider pointed at a remote https:// endpoint); tag by scheme
+                # instead of assuming local, so the audit trail stays accurate.
+                primary_endpoint = str(getattr(self.primary, "endpoint", ""))
+                default_source = "CLOUD" if primary_endpoint.startswith("https://") else "LOCAL"
+                res.setdefault("source", default_source)
                 return res
             # Primary failed or timed out; trip circuit breaker
             self.mark_local_down(30.0)

@@ -7,12 +7,8 @@ import time
 import argparse
 from pathlib import Path
 
-# Ensure UTF-8 output on Windows terminals
-if hasattr(sys.stdout, "reconfigure"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace") # type: ignore
-    except Exception:
-        pass
+from auto_permissions._console import ensure_utf8_console
+ensure_utf8_console()
 
 from auto_permissions import __version__
 from auto_permissions.config import load_config
@@ -34,7 +30,7 @@ def get_hooks_file(is_global: bool) -> Path:
         p = Path.cwd() / ".agents" / "hooks.json"
     return p
 
-def install_hook(is_global: bool) -> None:
+def install_hook(is_global: bool) -> bool:
     hook_file = get_hooks_file(is_global)
     hook_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -46,7 +42,7 @@ def install_hook(is_global: bool) -> None:
         except Exception as e:
             print(f"⚠️ Warning: Existing hooks file at {hook_file} could not be parsed: {e}")
             print("Aborting installation to prevent overwriting existing hooks configuration.")
-            return
+            return False
 
     # Cross-platform quoting for Antigravity hook runner:
     # Windows cmd.exe /c strips outer quotes if string starts and ends with quotes.
@@ -78,11 +74,16 @@ def install_hook(is_global: bool) -> None:
 
     current_data["auto-permissions-mode"] = hook_entry
 
-    with open(hook_file, "w", encoding="utf-8") as f:
-        json.dump(current_data, f, indent=2)
+    try:
+        with open(hook_file, "w", encoding="utf-8") as f:
+            json.dump(current_data, f, indent=2)
+    except Exception as e:
+        print(f"❌ Failed to write hooks file at {hook_file}: {e}")
+        return False
 
     target_desc = "globally (~/.gemini/config/hooks.json)" if is_global else "locally in .agents/hooks.json"
     print(f"✓ Successfully installed Auto Permissions Mode {target_desc}!")
+    return True
 
 def uninstall_hook(is_global: bool, purge: bool = False) -> None:
     hook_file = get_hooks_file(is_global)
@@ -426,7 +427,8 @@ def main() -> None:
     if args.command == "version":
         print(f"auto-permissions v{__version__}")
     elif args.command == "install":
-        install_hook(args.is_global)
+        if not install_hook(args.is_global):
+            sys.exit(1)
     elif args.command == "uninstall":
         uninstall_hook(args.is_global, purge=getattr(args, "purge", False))
     elif args.command == "setup":

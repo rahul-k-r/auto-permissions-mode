@@ -1,12 +1,10 @@
 """Anthropic Claude REST API connector with support for Haiku 4.5 and 3.5."""
-import os
 import json
 import urllib.request
 import urllib.error
-from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .base import BaseProvider, parse_json_safely
+from .base import BaseProvider, parse_json_safely, resolve_api_key
 
 class AnthropicProvider(BaseProvider):
     """Connects to Anthropic Messages API using standard urllib."""
@@ -20,27 +18,7 @@ class AnthropicProvider(BaseProvider):
         self.model = model
         self.temperature = temperature
         self.timeout = timeout
-        self.api_key = api_key or self._resolve_api_key()
-
-    @staticmethod
-    def _resolve_api_key() -> str:
-        # 1. Environment variable
-        env_key = os.environ.get("ANTHROPIC_API_KEY")
-        if env_key:
-            return env_key.strip()
-
-        # 2. Global user config (~/.gemini/config/auto-permissions.json)
-        global_config_path = Path.home() / ".gemini" / "config" / "auto-permissions.json"
-        if global_config_path.is_file():
-            try:
-                with open(global_config_path, "r", encoding="utf-8") as f:
-                    cfg = json.load(f)
-                key = cfg.get("anthropic_api_key") or cfg.get("api_key")
-                if key:
-                    return str(key).strip()
-            except Exception:
-                pass
-        return ""
+        self.api_key = api_key or resolve_api_key("ANTHROPIC_API_KEY", "anthropic_api_key")
 
     def evaluate(self, system_prompt: str, prompt: str) -> Optional[Dict[str, Any]]:
         if not self.api_key:

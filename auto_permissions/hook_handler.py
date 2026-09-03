@@ -4,17 +4,8 @@ import sys
 import json
 import time
 
-# Ensure UTF-8 output and input on Windows
-if hasattr(sys.stdout, "reconfigure"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace") # type: ignore
-    except Exception:
-        pass
-if hasattr(sys.stdin, "reconfigure"):
-    try:
-        sys.stdin.reconfigure(encoding="utf-8", errors="replace") # type: ignore
-    except Exception:
-        pass
+from auto_permissions._console import ensure_utf8_console
+ensure_utf8_console(stdin=True)
 
 from auto_permissions.config import load_config
 from auto_permissions.providers import get_provider

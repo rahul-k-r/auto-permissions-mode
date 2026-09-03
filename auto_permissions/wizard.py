@@ -70,6 +70,11 @@ def run_wizard(is_global: bool = True) -> None:
         elif c_prov == "3":
             cfg["provider"] = "openai"
             cfg["model"] = "gpt-4o-mini"
+            # factory.py's primary-provider branch treats "openai" as an
+            # OpenAI-compatible endpoint and otherwise leaves whatever local
+            # "endpoint" was already in the config (default: 127.0.0.1:9931) — it
+            # must be pointed at the real OpenAI API for this to actually be cloud.
+            cfg["endpoint"] = "https://api.openai.com/v1/chat/completions"
             try:
                 key = input("Enter OpenAI API Key (or press Enter to use $OPENAI_API_KEY): ").strip()
             except (EOFError, KeyboardInterrupt):

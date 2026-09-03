@@ -7,23 +7,8 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-# Ensure UTF-8 output and enable VT100 processing on Windows terminals
-if hasattr(sys.stdout, "reconfigure"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace") # type: ignore
-    except Exception:
-        pass
-
-if sys.platform == "win32":
-    try:
-        import ctypes
-        kernel32 = ctypes.windll.kernel32
-        hStdOut = kernel32.GetStdHandle(-11)
-        mode = ctypes.c_ulong()
-        kernel32.GetConsoleMode(hStdOut, ctypes.byref(mode))
-        kernel32.SetConsoleMode(hStdOut, mode.value | 0x0004) # ENABLE_VIRTUAL_TERMINAL_PROCESSING
-    except Exception:
-        pass
+from auto_permissions._console import ensure_utf8_console
+ensure_utf8_console(vt100=True)
 
 def get_audit_file() -> Path:
     """Get the persistent audit log file path."""
@@ -46,12 +31,17 @@ def _extract_project_name(context: Optional[Dict[str, Any]], args: Dict[str, Any
         if cwd:
             return Path(str(cwd)).name
 
-        # Or inspect file target path
+        # Or inspect a file target path (the file's parent directory is the project)
         for key in ("TargetFile", "AbsolutePath", "SearchPath"):
             path_val = args.get(key)
             if path_val and os.path.isabs(str(path_val)):
-                # Return parent directory name
                 return Path(str(path_val)).parent.name
+
+        # Or a directory target itself (the directory is the project)
+        for key in ("TargetDirectory", "DirectoryPath"):
+            path_val = args.get(key)
+            if path_val and os.path.isabs(str(path_val)):
+                return Path(str(path_val)).name
 
     return "workspace"
 
@@ -81,14 +71,13 @@ def record_audit_event(
         }
         line = json.dumps(event) + "\n"
         audit_path = get_audit_file()
-        for _ in range(3):
-            try:
-                with open(audit_path, "a", encoding="utf-8") as f:
-                    f.write(line)
-                    f.flush()
-                break
-            except (OSError, PermissionError):
-                time.sleep(0.01)
+        # Single best-effort attempt: this runs on the PreToolUse hot path for every
+        # tool call, so a blocking sleep-and-retry loop on write contention would
+        # directly inflate the latency budget the rest of this codebase tunes to the
+        # millisecond. Losing an occasional telemetry line under contention is fine.
+        with open(audit_path, "a", encoding="utf-8") as f:
+            f.write(line)
+            f.flush()
     except Exception:
         pass
 
