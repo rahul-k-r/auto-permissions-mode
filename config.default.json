@@ -7,7 +7,6 @@
   "timeout_seconds": 15,
   "fallback_action": "ask",
   "fast_path_read_only": true,
-  "strict_mode": false,
   "protected_paths": [
     ".git",
     ".env",

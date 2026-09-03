@@ -1,5 +1,7 @@
 """Security evaluation engine for Auto Permissions Mode."""
 
+import os
+import re
 import json
 from typing import Any, Dict
 from auto_permissions.providers import BaseProvider
@@ -181,8 +183,21 @@ class SecurityEvaluator:
         norm_target_check = str(target_path_or_cmd).replace("\\", "/").lower()
         for protected in self.protected_paths:
             norm_protected = protected.replace("\\", "/").lower()
-            # Require path boundary or exact match
-            if norm_protected in norm_target_check.split("/") or norm_protected in norm_target_check:
+            # Match as a path segment or file token, avoiding substring false positives (e.g. .gitignore matching .git)
+            path_segments = [seg.strip() for seg in re.split(r'[/\\ \t\'"]+', norm_target_check)]
+            is_match = False
+            for seg in path_segments:
+                if seg == norm_protected:
+                    is_match = True
+                    break
+                if norm_protected.startswith(".") and (seg.startswith(norm_protected + "/") or seg.startswith(norm_protected + "\\")):
+                    is_match = True
+                    break
+                if norm_protected == ".env" and (seg == ".env" or seg.startswith(".env.")):
+                    is_match = True
+                    break
+
+            if is_match:
                 if any(w in tool_name for w in ["write", "replace", "command"]) and "read" not in tool_name.lower():
                     warning_banner = f"\n⚠️ WARNING: Proposed action touches protected sensitive path: '{protected}'. Require strict safety review.\n"
                     break

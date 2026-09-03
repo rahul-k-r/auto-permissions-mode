@@ -14,7 +14,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "timeout_seconds": 15,
     "fallback_action": "ask",
     "fast_path_read_only": True,
-    "strict_mode": False,
     "protected_paths": [
         ".git",
         ".env",

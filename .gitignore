@@ -59,3 +59,7 @@ auto-permissions.json
 .agents/auto-permissions.json
 .agents/*.log
 
+# Scratch and Internal Notes
+ignore/
+
+
