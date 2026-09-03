@@ -1,6 +1,6 @@
 {
   "provider": "llamacpp",
-  "endpoint": "http://127.0.0.1:8080/v1/chat/completions",
+  "endpoint": "http://127.0.0.1:9931/v1/chat/completions",
   "model": "auto",
   "num_ctx": 8192,
   "temperature": 0.0,

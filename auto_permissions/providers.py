@@ -48,7 +48,7 @@ class OpenAICompatibleProvider(BaseProvider):
     """Connects to OpenAI-compatible endpoints like llama.cpp / llama-server, vLLM, or LM Studio."""
     def __init__(
         self,
-        endpoint: str = "http://127.0.0.1:8080/v1/chat/completions",
+        endpoint: str = "http://127.0.0.1:9931/v1/chat/completions",
         model: str = "auto",
         temperature: float = 0.0,
         timeout: float = 3.5,
@@ -69,7 +69,7 @@ class OpenAICompatibleProvider(BaseProvider):
             return self._cached_model_id
 
         # Check cross-process temp cache file with 60s TTL
-        cache_file = Path(tempfile.gettempdir()) / "auto_permissions_model_8080.json"
+        cache_file = Path(tempfile.gettempdir()) / "auto_permissions_model_llama.json"
         now = time.time()
         if cache_file.is_file():
             try:
@@ -83,24 +83,30 @@ class OpenAICompatibleProvider(BaseProvider):
             except Exception:
                 pass
 
-        # Query /v1/models with strict 1.0s timeout
-        models_endpoint = self.endpoint.rsplit("/chat/completions", 1)[0] + "/models"
-        try:
-            req = urllib.request.Request(models_endpoint, headers={"Accept": "application/json"})
-            with urllib.request.urlopen(req, timeout=1.0) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                model_list = data.get("data") or data.get("models") or []
-                if model_list and isinstance(model_list, list):
-                    detected = model_list[0].get("id") or model_list[0].get("name") or "default"
-                    self._cached_model_id = detected
-                    try:
-                        with open(cache_file, "w", encoding="utf-8") as f:
-                            json.dump({"model_id": detected, "cached_at": now}, f)
-                    except Exception:
-                        pass
-                    return detected
-        except Exception:
-            pass
+        # Query /v1/models with strict 1.0s timeout (try primary endpoint first, then legacy 8080)
+        candidate_endpoints = [self.endpoint]
+        if ":9931" in self.endpoint:
+            candidate_endpoints.append(self.endpoint.replace(":9931", ":8080"))
+
+        for ep in candidate_endpoints:
+            models_endpoint = ep.rsplit("/chat/completions", 1)[0] + "/models"
+            try:
+                req = urllib.request.Request(models_endpoint, headers={"Accept": "application/json"})
+                with urllib.request.urlopen(req, timeout=1.0) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    model_list = data.get("data") or data.get("models") or []
+                    if model_list and isinstance(model_list, list):
+                        detected = model_list[0].get("id") or model_list[0].get("name") or "default"
+                        self._cached_model_id = detected
+                        self.endpoint = ep  # Switch to active port
+                        try:
+                            with open(cache_file, "w", encoding="utf-8") as f:
+                                json.dump({"model_id": detected, "cached_at": now}, f)
+                        except Exception:
+                            pass
+                        return detected
+            except Exception:
+                continue
 
         return "default"
 
@@ -112,24 +118,35 @@ class OpenAICompatibleProvider(BaseProvider):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
-            "response_format": {"type": "json_object"},
-            "chat_template_kwargs": {"enable_thinking": False},
             "temperature": self.temperature,
+            "response_format": {"type": "json_object"},
         }
-        req = urllib.request.Request(
-            self.endpoint,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                choices = data.get("choices", [])
-                choice = choices[0] if choices else {}
-                content = choice.get("message", {}).get("content", "")
-                return parse_json_safely(content)
-        except Exception:
-            return None
+        data = json.dumps(payload).encode("utf-8")
+
+        endpoints_to_try = [self.endpoint]
+        if ":9931" in self.endpoint and self.endpoint.replace(":9931", ":8080") not in endpoints_to_try:
+            endpoints_to_try.append(self.endpoint.replace(":9931", ":8080"))
+
+        for ep in endpoints_to_try:
+            req = urllib.request.Request(
+                ep,
+                data=data,
+                headers={"Content-Type": "application/json", "Accept": "application/json"}
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                    resp_data = json.loads(resp.read().decode("utf-8"))
+                    choices = resp_data.get("choices", [])
+                    if choices:
+                        content = choices[0].get("message", {}).get("content", "")
+                        parsed = parse_json_safely(content)
+                        if parsed:
+                            self.endpoint = ep
+                            return parsed
+            except Exception:
+                continue
+
+        return None
 
 class OllamaProvider(BaseProvider):
     """Connects to Ollama using /api/chat with discrete system and user roles."""
@@ -344,7 +361,7 @@ class TieredProvider(BaseProvider):
 def get_provider(config: Dict[str, Any]) -> BaseProvider:
     """Instantiate and wire up providers based on config."""
     provider_name = config.get("provider", "llamacpp").lower()
-    endpoint = config.get("endpoint", "http://127.0.0.1:8080/v1/chat/completions")
+    endpoint = config.get("endpoint", "http://127.0.0.1:9931/v1/chat/completions")
     model = config.get("model", "auto")
     timeout = float(config.get("timeout_seconds", 3.5))
     temperature = float(config.get("temperature", 0.0))

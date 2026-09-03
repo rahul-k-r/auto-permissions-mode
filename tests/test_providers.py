@@ -90,7 +90,7 @@ class TestProviders(unittest.TestCase):
     def test_get_provider_tiered_wiring(self):
         cfg = {
             "provider": "llamacpp",
-            "endpoint": "http://127.0.0.1:8080/v1/chat/completions",
+            "endpoint": "http://127.0.0.1:9931/v1/chat/completions",
             "model": "auto",
             "fallback_to_cloud": True,
             "cloud_model": "gemini-flash-lite-latest",
