@@ -1,4 +1,4 @@
-# Local Models for Auto Permissions Mode & OpenClaw
+# Local Models for Auto Permissions Mode
 
 Place your downloaded GGUF model files in this directory (or anywhere on your machine and specify the path). All `.gguf` and `.bin` files inside this directory are automatically ignored by Git.
 

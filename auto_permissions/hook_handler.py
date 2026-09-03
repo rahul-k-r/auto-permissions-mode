@@ -2,11 +2,17 @@
 
 import sys
 import json
+import time
 
-# Ensure UTF-8 output on Windows
+# Ensure UTF-8 output and input on Windows
 if hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace") # type: ignore
+    except Exception:
+        pass
+if hasattr(sys.stdin, "reconfigure"):
+    try:
+        sys.stdin.reconfigure(encoding="utf-8", errors="replace") # type: ignore
     except Exception:
         pass
 
@@ -37,7 +43,9 @@ def run_hook() -> None:
             "transcript_path": data.get("transcriptPath", ""),
         }
 
+        t0 = time.time()
         result = evaluator.evaluate_tool_call(tool_name, tool_args, context=context)
+        latency_ms = (time.time() - t0) * 1000
     except Exception as e:
         fallback = config.get("fallback_action", "ask") if isinstance(config, dict) else "ask"
         if fallback == "ask":
@@ -46,6 +54,22 @@ def run_hook() -> None:
             "decision": fallback,
             "reason": f"Hook error ({str(e)}). Deferring to '{fallback}'."
         }
+        latency_ms = 0.0
+
+    # Non-blocking telemetry recording (<0.3ms)
+    try:
+        from auto_permissions.monitor import record_audit_event
+        record_audit_event(
+            tool_name=tool_name,
+            tool_args=tool_args,
+            decision=result.get("decision", "unknown"),
+            reason=result.get("reason", ""),
+            latency_ms=latency_ms,
+            source=result.get("source", "LOCAL"),
+            context=context
+        )
+    except Exception:
+        pass
 
     # Only log debug output if explicitly configured
     debug_log = config.get("debug_log")
@@ -57,7 +81,11 @@ def run_hook() -> None:
         except Exception:
             pass
 
-    print(json.dumps(result))
+    hook_output = {
+        "decision": result.get("decision", "force_ask"),
+        "reason": result.get("reason", "")
+    }
+    print(json.dumps(hook_output))
 
 if __name__ == "__main__":
     run_hook()

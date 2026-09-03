@@ -22,6 +22,11 @@ class MockSimpleProvider(BaseProvider):
         return self.response
 
 class TestProviders(unittest.TestCase):
+    def setUp(self):
+        TieredProvider._circuit_breaker_file().unlink(missing_ok=True)
+
+    def tearDown(self):
+        TieredProvider._circuit_breaker_file().unlink(missing_ok=True)
     def test_parse_json_safely_thinking_models(self):
         # 1. Closed thinking block
         raw = "<think>\nThinking through the risk...\n</think>\n{\"decision\": \"allow\", \"reason\": \"Safe build.\"}"
@@ -68,6 +73,36 @@ class TestProviders(unittest.TestCase):
         res = tiered.evaluate("system", "prompt")
         self.assertEqual(res["decision"], "force_ask")
         self.assertIn("unavailable", res["reason"].lower())
+
+    def test_tiered_provider_circuit_breaker(self):
+        primary = MockSimpleProvider(None)
+        secondary = MockSimpleProvider({"decision": "allow", "reason": "Cloud Gemini approved."})
+        tiered = TieredProvider(primary, secondary, total_deadline=11.0)
+
+        # First run: primary fails, secondary runs, trips circuit breaker
+        self.assertFalse(tiered.is_local_in_cooldown())
+        res1 = tiered.evaluate("system", "prompt")
+        self.assertEqual(res1["decision"], "allow")
+        self.assertTrue(tiered.is_local_in_cooldown())
+
+        # Second run: local is skipped via circuit breaker directly to cloud
+        res2 = tiered.evaluate("system", "prompt")
+        self.assertEqual(res2["decision"], "allow")
+
+    @patch("urllib.request.urlopen")
+    def test_ollama_auto_model_resolution(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({
+            "models": [
+                {"name": "mistral:latest"},
+                {"name": "qwen3.5:9b"}
+            ]
+        }).encode("utf-8")
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        ollama = OllamaProvider(model="auto")
+        resolved = ollama._resolve_model_id()
+        self.assertEqual(resolved, "qwen3.5:9b")
 
     @patch("urllib.request.urlopen")
     def test_gemini_provider_success(self, mock_urlopen):
