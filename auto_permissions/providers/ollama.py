@@ -23,9 +23,40 @@ class OllamaProvider(BaseProvider):
         self.temperature = temperature
         self.timeout = timeout
 
+        self._cached_model_id: Optional[str] = None
+
+    def _resolve_model_id(self) -> str:
+        """Resolve Ollama model tag; queries /api/tags if model is 'auto' or 'default'."""
+        if self.model and self.model not in ("auto", "default"):
+            return self.model
+
+        if self._cached_model_id:
+            return self._cached_model_id
+
+        tags_endpoint = self.endpoint.replace("/api/chat", "/api/tags")
+        req = urllib.request.Request(tags_endpoint, headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=1.0) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                models = [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+                if models:
+                    # Preference order for Auto Permissions Mode
+                    for pref in ("qwen3.5:9b", "qwen2.5:7b", "gemma4:e4b", "gemma4:12b", "gemma4:e2b"):
+                        for m in models:
+                            if m == pref or m.startswith(pref.split(":")[0]):
+                                self._cached_model_id = m
+                                return m
+                    self._cached_model_id = models[0]
+                    return models[0]
+        except Exception:
+            pass
+
+        return "qwen3.5:9b"
+
     def evaluate(self, system_prompt: str, prompt: str) -> Optional[Dict[str, Any]]:
+        resolved_model = self._resolve_model_id()
         payload = {
-            "model": self.model,
+            "model": resolved_model,
             "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}

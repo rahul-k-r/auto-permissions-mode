@@ -1,8 +1,29 @@
 """Base provider abstract class and JSON sanitization utilities."""
 import json
+import os
 import re
+import time
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import Any, Dict, Optional
+
+def resolve_api_key(env_var: str, config_key: str) -> str:
+    """Resolve an API key from an env var, then the global user config file."""
+    env_key = os.environ.get(env_var)
+    if env_key:
+        return env_key.strip()
+
+    global_config_path = Path.home() / ".gemini" / "config" / "auto-permissions.json"
+    if global_config_path.is_file():
+        try:
+            with open(global_config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            key = cfg.get(config_key) or cfg.get("api_key")
+            if key:
+                return str(key).strip()
+        except Exception:
+            pass
+    return ""
 
 def parse_json_safely(raw_text: str) -> Optional[Dict[str, Any]]:
     """Sanitize <think> tags and extract valid JSON payload reliably."""
@@ -40,6 +61,30 @@ def parse_json_safely(raw_text: str) -> Optional[Dict[str, Any]]:
         return {"decision": dec, "reason": reason}
 
     return None
+
+def is_in_ttl_cooldown(path: Path, key: str = "until") -> bool:
+    """Best-effort check of a JSON TTL-flag file shared across processes."""
+    if not path.is_file():
+        return False
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return time.time() < data.get(key, 0)
+    except Exception:
+        return False
+
+def write_ttl_cooldown(path: Path, duration: float, key: str = "until", extra: Optional[Dict[str, Any]] = None) -> None:
+    """Best-effort atomic write of a JSON TTL-flag file (write-temp + replace avoids torn reads)."""
+    try:
+        data: Dict[str, Any] = {key: time.time() + duration}
+        if extra:
+            data.update(extra)
+        tmp = path.parent / f"{path.name}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+    except Exception:
+        pass
 
 class BaseProvider(ABC):
     """Abstract base class for all LLM permission evaluators."""

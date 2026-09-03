@@ -1,55 +1,55 @@
-# 🛡️ Auto Permissions Mode
+# Auto Permissions Mode
 
-> **Autonomous local LLM security gatekeeper and permissions engine for AI coding agents.**  
-> Emulates Claude Code's *Auto Mode* for Google Antigravity (`agy`), Antigravity 2.0, OpenClaw, and agentic IDEs using local open-weight models (Qwen 3.5, Gemma 4, Llama) with multi-cloud failover.
+> **Autonomous local LLM security gatekeeper and permissions engine for Google Antigravity.**  
+> Emulates the concept of Claude Code's *Auto Mode* for the Google Antigravity ecosystem (Antigravity IDE, Antigravity 2.0, Antigravity VS Code Extension, and `agy` CLI) using local open-weight models (Qwen 3.5, Gemma 4, Llama) with multi-cloud failover.
 
 ---
 
-## 💡 What is Auto Permissions Mode?
+## Overview
 
-When running autonomous AI coding agents, you normally face a dilemma:
-1. **Manual Prompts for Everything**: Constant interruptions asking for permission to run read-only inspections, builds, edits, or tests.
-2. **YOLO / Unrestricted Mode**: Catastrophic risk of accidental destructive commands (`rm -rf /`, dropping databases, force-pushing over `main`, Trojan reverse-shells in test fixtures, or exfiltrating `.env` secrets).
+When running autonomous AI coding agents, developers typically face two extremes:
+1. **Constant Interruption**: Repetitive permission prompts for benign inspections, builds, file edits, or tests.
+2. **Unrestricted Risk**: Severe vulnerabilities from accidental destructive commands (`rm -rf /`, dropping database tables, force-pushing over `main`, Trojan reverse-shells in test fixtures, or credential exfiltration).
 
-**Auto Permissions Mode** inserts a local model (running via `llama.cpp` on your GPU) as a real-time, hardware-accelerated security gatekeeper with cloud failover.
+**Auto Permissions Mode** runs a local model (via `llama.cpp` on your GPU) as a real-time, hardware-accelerated security gatekeeper with cloud failover.
 
 ```mermaid
 flowchart TD
-    Agent[AI Agent / agy / OpenClaw] -->|Proposes Tool Call| Hook[PreToolUse Hook]
-    Hook -->|Fast-Path Safe?| FastPath{0ms Fast-Path Check}
-    FastPath -->|Yes: view_file, grep, git commit, brain artifacts| InstantAllow[⚡ 0ms Instant Allow]
-    FastPath -->|No: run_command, write_to_file, replace_file_content| LocalCheck{Local llama.cpp Running?}
+    Agent[Antigravity Agent / agy CLI / IDE] -->|Proposes Tool Call| Hook[PreToolUse Hook]
+    Hook -->|Safe Deterministic Action?| FastPath{Fast-Path Check}
+    FastPath -->|view_file, grep, git commit, artifacts| InstantAllow[0ms Instant Allow: AUTO]
+    FastPath -->|run_command, write_to_file, replace_file_content| LocalCheck{Local llama.cpp Running?}
     
-    LocalCheck -->|Yes: http://127.0.0.1:9931| LocalEngine[Local Engine: Qwen 3.5 9B / Gemma 4]
-    LocalCheck -->|No / Timeout >3.5s| CloudEngine[Cloud Failover: Gemini / Claude / GPT]
+    LocalCheck -->|Port 9931 Active| LocalEngine[Local Engine: LOCAL-LLM]
+    LocalCheck -->|Offline / Timeout >3.5s| CloudEngine[Cloud Failover: FAILOVER]
     
     LocalEngine --> Decision{Gatekeeper Decision}
     CloudEngine --> Decision
     
     Decision -->|Safe Dev Action| Allow[Allow Execution]
     Decision -->|Destructive / Attack / Trojan| Deny[Deny + Constructive Self-Correction]
-    Decision -->|High Impact / Remote Push / Both Offline| Ask[Escalate to User Confirmation: force_ask]
+    Decision -->|High Impact / Remote Push / Both Offline| Ask[Escalate to User: FORCE_ASK]
     
     Deny -->|Constructive Reason| Agent
     Allow -->|Execute| OS[System Execution]
-    Ask -->|Interactive Prompt| User[Human User]
+    Ask -->|Interactive Prompt| User[Human Confirmation]
 ```
 
 ---
 
-## ✨ Key Capabilities
+## Core Capabilities
 
-- **🔒 Local-First Privacy**: Evaluates state-modifying actions on your local GPU (`http://127.0.0.1:9931`) with unlimited requests, zero cloud costs, and 100% privacy.
-- **⚡ 0ms Fast-Path Inspection**: Read-only tools (`view_file`, `list_dir`, `find_by_name`, `grep_search`), safe local git commits (`git add`, `git commit`), and Antigravity brain artifacts execute instantly in 0ms with 0 tokens.
-- **🌐 Seamless Cloud Failover**: If your local server is offline, requests seamlessly fail over to **Gemini Flash Lite** (free tier), **Claude Haiku 4.5**, **GPT-5.6 Luna / 4o-mini**, or **OpenRouter**.
-- **🧠 Quantized KV Cache & Flash Attention**: Presets use `-ctk q4_0 -ctv q4_0` and `--flash-attn on`, slashing KV cache memory by 75% while boosting prompt evaluation to **1,700+ tokens/sec**.
-- **👥 Multi-Agent Parallelism**: Dedicated multi-slot support (`-np 3`, `-c 36864`) prevents KV cache thrashing when multiple subagents execute concurrently.
-- **🛡️ Trojan & Circumvention Detection**: Scans file modifications to prevent hidden reverse shells, unauthorized socket connections, exfiltration of `.env` files, or malicious build scripts.
-- **🔄 Instructional Self-Correction**: When an action is denied, the gatekeeper explains *why* it was blocked and suggests a safe alternative so the agent self-corrects without stalling.
+- **Local-First Privacy**: Evaluates state-modifying actions on your local GPU (`http://127.0.0.1:9931`) with unlimited requests, zero cloud costs, and complete privacy.
+- **Sub-Millisecond Fast-Path**: Read-only tools (`view_file`, `list_dir`, `find_by_name`, `grep_search`), safe local git operations (`git add`, `git commit`), and internal brain artifacts execute in 0ms with zero model overhead.
+- **Multi-Cloud Failover**: If your local model is offline or cold, requests route seamlessly to **Gemini Flash Lite** (free tier), **Claude Haiku**, **GPT-4o-mini**, or **OpenRouter**.
+- **Quantized KV Cache & Flash Attention**: Presets utilize `-ctk q4_0 -ctv q4_0` and `--flash-attn on`, reducing KV memory by 75% and accelerating prompt evaluation to **1,700+ tokens/sec**.
+- **Multi-Agent Parallelism**: Configured for multi-slot execution (`-np 3`, `-c 36864`), eliminating KV cache thrashing when concurrent subagents run tasks simultaneously.
+- **Trojan & Circumvention Detection**: Analyzes tool payloads to intercept hidden reverse shells, unauthorized outbound network calls, exfiltration of `.env` files, or malicious build hooks.
+- **Constructive Self-Correction**: When an action is denied, the gatekeeper provides an instructional explanation and suggests a non-destructive alternative so agents self-correct without stalling.
 
 ---
 
-## 📦 Quick Start
+## Quick Start
 
 ### 1. Requirements
 - Python 3.9+ (Zero external dependencies; uses standard library `urllib`, `json`, and `secrets`).
@@ -79,28 +79,107 @@ llama serve -m "models/Qwen3.5-9B-UD-Q4_K_XL.gguf" `
 
 ---
 
-### 3. Install the Hook
+## ⚡ Quick Installation
 
-Install Auto Permissions Mode into Antigravity with a single command:
+Auto Permissions Mode installs in seconds into an isolated environment without modifying your global Python tools.
 
+### Interactive Guided Onboarding (Default)
+Guides you through hardware auto-probing, model selection, optional Hugging Face model download, cloud failover (Gemini/Claude/OpenAI), and desktop shortcut creation.
+
+**Windows (PowerShell):**
 ```powershell
-# Global installation (protects all agy sessions across all workspaces)
-python -m auto_permissions install --global
+git clone https://github.com/rahul-k-r/auto-permissions-mode.git
+cd auto-permissions-mode
+.\install.ps1
+```
 
-# Or install locally for the current repository only (.agents/hooks.json)
-python -m auto_permissions install --local
+**macOS & Linux (Bash / Zsh):**
+```bash
+git clone https://github.com/rahul-k-r/auto-permissions-mode.git
+cd auto-permissions-mode
+./install.sh
 ```
 
 ---
 
-### 4. Check Status & Run Diagnostics
+### Automated and Headless Setup
+
+For CI/CD, remote developer boxes, or scripted deployment, run non-interactively using command-line switches:
+
+#### Windows Automated Flags:
+```powershell
+# 1. Fully automated with auto-detected VRAM tier and Desktop shortcuts:
+.\install.ps1 -NonInteractive -DesktopShortcuts
+
+# 2. Automated with explicit VRAM tier and automatic model download:
+.\install.ps1 -NonInteractive -Vram 8gb -Download -DesktopShortcuts
+
+# 3. Clean uninstall and hook removal:
+.\install.ps1 -Uninstall
+```
+
+| Parameter | Type | Description |
+| :--- | :--- | :--- |
+| `-NonInteractive` | switch | Run headless without wizard prompts, using detected hardware defaults. |
+| `-Vram <tier>` | string | Target VRAM profile: `4gb`, `6gb`, `8gb`, `12gb`, `16gb`, `24gb` (defaults to auto-detected GPU VRAM). |
+| `-Download` | switch | Automatically download the recommended GGUF model from Hugging Face with live progress bar. |
+| `-DesktopShortcuts` | switch | Place convenient launcher shortcuts (`Auto Permissions Monitor.bat` and `Start Local Gatekeeper.bat`) directly on Desktop. |
+| `-Uninstall` | switch | Safely unregister Antigravity hooks and remove the isolated virtual environment. |
+
+#### macOS & Linux Automated Flags:
+```bash
+# 1. Fully automated with auto-detected VRAM tier:
+NON_INTERACTIVE=1 ./install.sh
+
+# 2. Automated with explicit VRAM tier:
+NON_INTERACTIVE=1 VRAM=8gb ./install.sh
+
+# 3. Clean uninstall:
+./install.sh --uninstall
+```
+
+---
+
+### Desktop and Command-Line Shortcuts
+
+Generate or refresh desktop shortcuts anytime with:
+```powershell
+# Windows PowerShell
+& "$HOME\.gemini\antigravity\tools\auto-permissions-env\Scripts\python.exe" -m auto_permissions.cli shortcuts
+
+# macOS / Linux
+~/.gemini/antigravity/tools/auto-permissions-env/bin/python -m auto_permissions.cli shortcuts
+```
+Creates:
+- `Auto Permissions Monitor.bat` (`.sh`): Double-click to stream the real-time live audit board in a dedicated terminal window.
+- `Start Local Gatekeeper.bat` (`.sh`): Double-click to start local inference on port `9931` with optimal flags for your GPU.
+
+---
+
+### Protected Antigravity Surfaces
+
+Once installed, the PreToolUse security gatekeeper is active across all Google Antigravity environments automatically:
+- **Antigravity IDE** (in-editor AI workflows and sidebars)
+- **Antigravity 2.0** (desktop application and agent canvases)
+- **Antigravity VS Code Extension** (standard VS Code pair programming)
+- **Antigravity CLI (`agy`)** (terminal agents)
+
+---
+
+### Status and Live Diagnostics
 
 ```powershell
-# Check hook status and active provider
-python -m auto_permissions status
+# Check live server ports, hook status, and active provider
+auto-permissions status
 
-# Run live 12-test diagnostic suite against your running model
-python -m auto_permissions test
+# Verify live Antigravity hook pipeline bridge
+auto-permissions verify
+
+# Open live real-time audit board streaming tool calls & decisions
+auto-permissions monitor
+
+# Run full diagnostic self-test suite
+auto-permissions test
 ```
 
 Sample output:
@@ -127,7 +206,7 @@ Test Summary: 12/12 tests passed.
 
 ---
 
-## ⚙️ Configuration (`auto-permissions.json`)
+## Configuration (`auto-permissions.json`)
 
 Configure locally in `.agents/auto-permissions.json` or globally in `~/.gemini/config/auto-permissions.json`:
 
@@ -167,7 +246,7 @@ Configure locally in `.agents/auto-permissions.json` or globally in `~/.gemini/c
 
 ---
 
-## 🏗️ Hardware Matrix & Model Selection
+## Hardware Matrix and Model Selection
 
 See the full benchmarked hardware guide with direct Hugging Face download links in [**models/README.md**](models/README.md):
 
@@ -180,6 +259,6 @@ See the full benchmarked hardware guide with direct Hugging Face download links 
 
 ---
 
-## 📄 License
+## License
 
 MIT © [Rahul](https://github.com/rahul-k-r)

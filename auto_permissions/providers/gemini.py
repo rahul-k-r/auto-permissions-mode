@@ -1,14 +1,12 @@
 """Google Gemini REST API connector with OpenAPI schema and HTTP 429 cooldown detection."""
-import os
 import json
-import time
 import tempfile
 import urllib.request
 import urllib.error
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from .base import BaseProvider, parse_json_safely
+from .base import BaseProvider, parse_json_safely, resolve_api_key, is_in_ttl_cooldown, write_ttl_cooldown
 
 class GeminiProvider(BaseProvider):
     """Connects to Google Gemini Flash Lite via generative language REST API."""
@@ -22,50 +20,17 @@ class GeminiProvider(BaseProvider):
         self.model = model
         self.temperature = temperature
         self.timeout = timeout
-        self.api_key = api_key or self._resolve_api_key()
-
-    @staticmethod
-    def _resolve_api_key() -> str:
-        # 1. Environment variable
-        env_key = os.environ.get("GEMINI_API_KEY")
-        if env_key:
-            return env_key.strip()
-
-        # 2. Global user config (~/.gemini/config/auto-permissions.json)
-        global_config_path = Path.home() / ".gemini" / "config" / "auto-permissions.json"
-        if global_config_path.is_file():
-            try:
-                with open(global_config_path, "r", encoding="utf-8") as f:
-                    cfg = json.load(f)
-                key = cfg.get("gemini_api_key") or cfg.get("api_key")
-                if key:
-                    return str(key).strip()
-            except Exception:
-                pass
-        return ""
+        self.api_key = api_key or resolve_api_key("GEMINI_API_KEY", "gemini_api_key")
 
     @staticmethod
     def _get_cooldown_file() -> Path:
         return Path(tempfile.gettempdir()) / "auto_permissions_gemini_cooldown.json"
 
     def is_in_cooldown(self) -> bool:
-        cooldown_file = self._get_cooldown_file()
-        if not cooldown_file.is_file():
-            return False
-        try:
-            with open(cooldown_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            until = data.get("cooldown_until", 0)
-            return time.time() < until
-        except Exception:
-            return False
+        return is_in_ttl_cooldown(self._get_cooldown_file(), key="cooldown_until")
 
     def _set_cooldown(self, seconds: int = 60, reason: str = "HTTP 429 Rate Limit") -> None:
-        try:
-            with open(self._get_cooldown_file(), "w", encoding="utf-8") as f:
-                json.dump({"cooldown_until": time.time() + seconds, "reason": reason}, f)
-        except Exception:
-            pass
+        write_ttl_cooldown(self._get_cooldown_file(), seconds, key="cooldown_until", extra={"reason": reason})
 
     def evaluate(self, system_prompt: str, prompt: str) -> Optional[Dict[str, Any]]:
         if not self.api_key or self.is_in_cooldown():
