@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "auto-permissions"
-version = "0.3.2"
+version = "0.3.3"
 description = "Autonomous local LLM security gatekeeper and permissions engine for AI coding agents."
 readme = "README.md"
 authors = [{ name = "Rahul" }]
