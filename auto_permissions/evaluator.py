@@ -86,6 +86,7 @@ REMOTE_OR_RISKY_GIT_FLAGS = (
     "--force",
     "-f",
     "-D",
+    "-d",
     "--delete",
     "--hard",
     "clean",
@@ -166,8 +167,19 @@ class SecurityEvaluator:
                 if tokens and tokens[0] == "git":
                     cmd_tokens_set = set(tokens)
                     has_risky_flag = any(flag in cmd_tokens_set for flag in REMOTE_OR_RISKY_GIT_FLAGS)
-                    # Block destructive checkout (. or --) from fast-path
-                    is_destructive_checkout = "checkout" in tokens and any(t in tokens for t in (".", "--"))
+                    # Block destructive checkout: explicit `.`/`--`, or a bare path-like
+                    # argument (contains '/' or '.') that isn't a new-branch checkout,
+                    # since `git checkout <file>` with no `--` also discards local changes.
+                    is_destructive_checkout = False
+                    if "checkout" in tokens:
+                        checkout_idx = tokens.index("checkout")
+                        checkout_args = tokens[checkout_idx + 1:]
+                        if any(t in ("." , "--") for t in checkout_args):
+                            is_destructive_checkout = True
+                        elif "-b" not in checkout_args and "-B" not in checkout_args:
+                            non_flag_args = [t for t in checkout_args if not t.startswith("-")]
+                            if any("/" in t or "." in t for t in non_flag_args):
+                                is_destructive_checkout = True
                     if not has_risky_flag and not is_destructive_checkout and any(cmd.startswith(prefix) for prefix in SAFE_LOCAL_GIT_PREFIXES):
                         return {
                             "decision": "allow",
@@ -185,21 +197,28 @@ class SecurityEvaluator:
         )
         warning_banner = ""
         norm_target_check = str(target_path_or_cmd).replace("\\", "/").lower()
+        path_segments = [seg.strip() for seg in re.split(r'[/\\ \t\'"]+', norm_target_check) if seg.strip()]
         for protected in self.protected_paths:
             norm_protected = protected.replace("\\", "/").lower()
-            # Match as a path segment or file token, avoiding substring false positives (e.g. .gitignore matching .git)
-            path_segments = [seg.strip() for seg in re.split(r'[/\\ \t\'"]+', norm_target_check)]
+            # Match as a run of consecutive path segments, avoiding substring false
+            # positives (e.g. .gitignore matching .git) while still matching
+            # multi-segment protected paths like "C:\Windows\System32" or "/etc".
+            protected_segments = [seg for seg in norm_protected.strip("/").split("/") if seg]
             is_match = False
-            for seg in path_segments:
-                if seg == norm_protected:
-                    is_match = True
-                    break
-                if norm_protected.startswith(".") and (seg.startswith(norm_protected + "/") or seg.startswith(norm_protected + "\\")):
-                    is_match = True
-                    break
-                if norm_protected == ".env" and (seg == ".env" or seg.startswith(".env.")):
-                    is_match = True
-                    break
+            n = len(protected_segments)
+            if n > 0:
+                for i in range(len(path_segments) - n + 1):
+                    if path_segments[i:i + n] == protected_segments:
+                        is_match = True
+                        break
+            if not is_match:
+                for seg in path_segments:
+                    if norm_protected.startswith(".") and (seg.startswith(norm_protected + "/") or seg.startswith(norm_protected + "\\")):
+                        is_match = True
+                        break
+                    if norm_protected == ".env" and (seg == ".env" or seg.startswith(".env.")):
+                        is_match = True
+                        break
 
             if is_match:
                 if any(w in tool_name for w in ["write", "replace", "command"]) and "read" not in tool_name.lower():

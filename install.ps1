@@ -234,6 +234,10 @@ Write-Step "Registering Antigravity PreToolUse hook..."
 
 Write-Step "Testing hook bridge integrity..."
 & "$venvPython" -m auto_permissions.cli verify
+if ($LASTEXITCODE -ne 0) {
+    Write-Err "Hook verification failed"
+    exit 1
+}
 
 if ($DesktopShortcuts) {
     Write-Step "Creating Desktop shortcuts..."

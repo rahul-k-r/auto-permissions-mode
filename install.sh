@@ -152,6 +152,15 @@ else
     VRAM_TIER="${VRAM:-}"
     if [ -z "$VRAM_TIER" ]; then
         VRAM_TIER="$("$VENV_PYTHON" -c "import json; from auto_permissions.hardware import detect_hardware; print(detect_hardware().get('recommended_tier', '8gb'))")"
+    else
+        VRAM_TIER="$(echo "$VRAM_TIER" | tr '[:upper:]' '[:lower:]')"
+        case "$VRAM_TIER" in
+            4gb|6gb|8gb|12gb|16gb|24gb) ;;
+            *)
+                write_err "Invalid VRAM tier '$VRAM_TIER' (expected one of: 4gb, 6gb, 8gb, 12gb, 16gb, 24gb)"
+                exit 1
+                ;;
+        esac
     fi
     "$VENV_PYTHON" -m auto_permissions.cli setup --vram "$VRAM_TIER" --global
 fi

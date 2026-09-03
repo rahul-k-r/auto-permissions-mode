@@ -226,45 +226,6 @@ def run_tests() -> None:
 
     print(f"Test Summary: {passed}/{len(test_cases)} tests passed.")
 
-VRAM_PROFILES = {
-    "4gb": {
-        "model": "gemma-4-E2B-it-UD-Q3_K_XL.gguf",
-        "num_ctx": 8192,
-        "modelfile": "Modelfile.4gb-gemma4-e2b",
-        "description": "Ultra-lightweight edge profile (Gemma 4 E2B, ~2.9 GB VRAM, leaves headroom for OS)",
-    },
-    "6gb": {
-        "model": "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
-        "num_ctx": 8192,
-        "modelfile": "Modelfile.6gb-gemma4-e4b",
-        "description": "Ultra-low latency profile (Gemma 4 E4B QAT with MTP, <20ms latency)",
-    },
-    "8gb": {
-        "model": "Qwen3.5-9B-UD-Q4_K_XL.gguf",
-        "num_ctx": 8192,
-        "modelfile": "Modelfile.8gb-qwen3.5-9b",
-        "description": "Sweet spot daily driver (Qwen 3.5 9B, 82.7% LiveCodeBench, top security detection)",
-    },
-    "12gb": {
-        "model": "gemma-4-12B-it-qat-UD-Q4_K_XL.gguf",
-        "num_ctx": 8192,
-        "modelfile": "Modelfile.12gb-gemma4-12b",
-        "description": "Maximum threat reasoning on 12GB cards (Gemma 4 12B QAT with MTP)",
-    },
-    "16gb": {
-        "model": "gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf",
-        "num_ctx": 8192,
-        "modelfile": "Modelfile.16gb-gemma4-26b",
-        "description": "Mixture-of-Experts frontier profile (Gemma 4 26B A4B MoE, 4B active speed)",
-    },
-    "24gb": {
-        "model": "Qwen3.8-35B-UD-Q4_K_XL.gguf",
-        "num_ctx": 8192,
-        "modelfile": "Modelfile.24gb-qwen3.8-35b",
-        "description": "Flagship enterprise dense reasoning profile (Qwen 3.8 35B / Gemma 4 31B)",
-    },
-}
-
 def setup_vram_profile(vram_tier: str, is_global: bool = True, download: bool = False) -> None:
     tier = vram_tier.lower()
     if tier not in VRAM_PROFILES:
@@ -493,7 +454,8 @@ def main() -> None:
     elif args.command == "status":
         show_status()
     elif args.command == "verify":
-        verify_hook()
+        if not verify_hook():
+            sys.exit(1)
     else:
         parser.print_help()
 

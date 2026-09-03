@@ -44,7 +44,7 @@ def run_hook() -> None:
         context = {
             "workspace_paths": data.get("workspacePaths", []),
             "artifact_dir": data.get("artifactDirectoryPath", ""),
-            "conversation_id": data.get("conversationId", ""),
+            "conversation_id": data.get("conversationId") or "",
             "transcript_path": data.get("transcriptPath", ""),
         }
 
@@ -57,7 +57,8 @@ def run_hook() -> None:
             fallback = "force_ask"
         result = {
             "decision": fallback,
-            "reason": f"Hook error ({str(e)}). Deferring to '{fallback}'."
+            "reason": f"Hook error ({str(e)}). Deferring to '{fallback}'.",
+            "source": "ERROR",
         }
         latency_ms = 0.0
 

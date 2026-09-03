@@ -1,5 +1,7 @@
 """Tiered provider coordinator for local-first execution with cloud failover."""
+import hashlib
 import json
+import os
 import time
 import tempfile
 from pathlib import Path
@@ -26,9 +28,19 @@ class TieredProvider(BaseProvider):
         self.secondary = secondary
         self.total_deadline = total_deadline
 
+    def _circuit_breaker_file(self) -> Path:
+        # Scope the breaker file to the primary endpoint so unrelated local
+        # servers (different port/config) don't share cooldown state.
+        key_src = getattr(self.primary, "endpoint", self.primary.__class__.__name__)
+        key = hashlib.sha256(str(key_src).encode("utf-8")).hexdigest()[:12]
+        return Path(tempfile.gettempdir()) / f"auto_permissions_cb_{key}.json"
+
     @staticmethod
-    def _circuit_breaker_file() -> Path:
-        return Path(tempfile.gettempdir()) / "auto_permissions_local_down.json"
+    def _atomic_write_json(path: Path, data: dict) -> None:
+        tmp = path.parent / f"{path.name}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
 
     def is_local_in_cooldown(self) -> bool:
         """Check if local server is marked as down (30s TTL)."""
@@ -47,8 +59,7 @@ class TieredProvider(BaseProvider):
         """Mark local server down for duration seconds."""
         cb_file = self._circuit_breaker_file()
         try:
-            with open(cb_file, "w", encoding="utf-8") as f:
-                json.dump({"down_until": time.time() + duration}, f)
+            self._atomic_write_json(cb_file, {"down_until": time.time() + duration})
         except Exception:
             pass
 
@@ -56,8 +67,7 @@ class TieredProvider(BaseProvider):
         """Clear circuit breaker when local server succeeds."""
         cb_file = self._circuit_breaker_file()
         try:
-            if cb_file.is_file():
-                cb_file.unlink()
+            self._atomic_write_json(cb_file, {"down_until": 0})
         except Exception:
             pass
 

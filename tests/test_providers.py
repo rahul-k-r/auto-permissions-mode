@@ -23,10 +23,10 @@ class MockSimpleProvider(BaseProvider):
 
 class TestProviders(unittest.TestCase):
     def setUp(self):
-        TieredProvider._circuit_breaker_file().unlink(missing_ok=True)
+        TieredProvider(MockSimpleProvider())._circuit_breaker_file().unlink(missing_ok=True)
 
     def tearDown(self):
-        TieredProvider._circuit_breaker_file().unlink(missing_ok=True)
+        TieredProvider(MockSimpleProvider())._circuit_breaker_file().unlink(missing_ok=True)
     def test_parse_json_safely_thinking_models(self):
         # 1. Closed thinking block
         raw = "<think>\nThinking through the risk...\n</think>\n{\"decision\": \"allow\", \"reason\": \"Safe build.\"}"

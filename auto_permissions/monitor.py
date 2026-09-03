@@ -192,6 +192,8 @@ def _print_event_line(raw_json_line: str) -> None:
             src_badge = "\033[34mCLOUD-LLM \033[0m" # Blue (Direct Cloud model)
         elif src == "OFFLINE":
             src_badge = "\033[31mOFFLINE   \033[0m" # Red (Model server offline)
+        elif src == "ERROR":
+            src_badge = "\033[31mHOOK ERR  \033[0m" # Red (Hook crashed before evaluation ran)
         elif src == "TIMEOUT":
             src_badge = "\033[33mTIMEOUT   \033[0m" # Yellow (Evaluation deadline exceeded)
         else:
