@@ -1,75 +1,90 @@
 # 🛡️ Auto Permissions Mode
 
 > **Autonomous local LLM security gatekeeper and permissions engine for AI coding agents.**  
-> Emulates Claude Code's *Auto Mode* for Google Antigravity (`agy`), Antigravity 2.0, and other agentic environments using local open-weight models (Gemma 4, Qwen, Llama).
+> Emulates Claude Code's *Auto Mode* for Google Antigravity (`agy`), Antigravity 2.0, OpenClaw, and agentic IDEs using local open-weight models (Qwen 3.5, Gemma 4, Llama) with multi-cloud failover.
 
 ---
 
 ## 💡 What is Auto Permissions Mode?
 
 When running autonomous AI coding agents, you normally face a dilemma:
-1. **Manual Prompts for Everything**: Constant interruptions asking for permission to run commands, edit files, or view directories.
-2. **YOLO / Unrestricted Mode**: Risk of accidental destructive commands (`rm -rf /`, dropping tables, force-pushing over main, or exfiltrating `.env` secrets).
+1. **Manual Prompts for Everything**: Constant interruptions asking for permission to run read-only inspections, builds, edits, or tests.
+2. **YOLO / Unrestricted Mode**: Catastrophic risk of accidental destructive commands (`rm -rf /`, dropping databases, force-pushing over `main`, Trojan reverse-shells in test fixtures, or exfiltrating `.env` secrets).
 
-**Auto Permissions Mode** solves this by inserting a local LLM (running locally on your GPU via Ollama or llama.cpp) as a real-time security gatekeeper.
+**Auto Permissions Mode** inserts a local model (running via `llama.cpp` on your GPU) as a real-time, hardware-accelerated security gatekeeper with cloud failover.
 
 ```mermaid
 flowchart TD
-    Agent[AI Agent / agy] -->|Proposes Tool Call| Hook[PreToolUse Hook]
-    Hook -->|Read-Only Tool?| FastPath{Fast-Path Check}
-    FastPath -->|Yes e.g. view_file| InstantAllow[0ms Instant Allow]
-    FastPath -->|No e.g. run_command, write_to_file| LocalLLM[Local Model e.g. Gemma 4 12B]
+    Agent[AI Agent / agy / OpenClaw] -->|Proposes Tool Call| Hook[PreToolUse Hook]
+    Hook -->|Fast-Path Safe?| FastPath{0ms Fast-Path Check}
+    FastPath -->|Yes: view_file, grep, git commit, brain artifacts| InstantAllow[⚡ 0ms Instant Allow]
+    FastPath -->|No: run_command, write_to_file, replace_file_content| LocalCheck{Local llama.cpp Running?}
     
-    LocalLLM --> Decision{Model Decision}
+    LocalCheck -->|Yes: http://127.0.0.1:9931| LocalEngine[Local Engine: Qwen 3.5 9B / Gemma 4]
+    LocalCheck -->|No / Timeout >3.5s| CloudEngine[Cloud Failover: Gemini / Claude / GPT]
+    
+    LocalEngine --> Decision{Gatekeeper Decision}
+    CloudEngine --> Decision
+    
     Decision -->|Safe Dev Action| Allow[Allow Execution]
-    Decision -->|Destructive / Circumvention| Deny[Deny + Constructive Feedback]
-    Decision -->|Ambiguous / High Impact| Ask[Escalate to User Confirmation]
+    Decision -->|Destructive / Attack / Trojan| Deny[Deny + Constructive Self-Correction]
+    Decision -->|High Impact / Remote Push / Both Offline| Ask[Escalate to User Confirmation: force_ask]
     
-    Deny -->|Self-Correction Prompt| Agent
+    Deny -->|Constructive Reason| Agent
     Allow -->|Execute| OS[System Execution]
     Ask -->|Interactive Prompt| User[Human User]
 ```
 
 ---
 
-## ✨ Key Features
+## ✨ Key Capabilities
 
-- **🔒 100% Local & Private**: All security auditing runs on your local machine. No tool calls or code diffs leave your system.
-- **⚡ Fast-Path Inspection**: Safe, read-only tools (`view_file`, `list_dir`, `find_by_name`, `grep_search`) are allowed with **0ms latency**, dedicating GPU inference strictly to state-modifying actions (`run_command`, `write_to_file`, `replace_file_content`).
-- **🔄 Instructional Denials & Self-Correction**: When an action is denied, the gatekeeper returns constructive guidance explaining *why* it was blocked and *how* to achieve the goal safely. The agent adapts its plan immediately without crashing or stalling.
-- **🛡️ Anti-Circumvention Detection**: Scans file modifications to prevent trojans (e.g., hidden `subprocess` calls in test scripts, malicious `package.json` build scripts, or base64-encoded reverse shells).
-- **🚀 One-Command Install**: Easy CLI to install, test, and manage hooks across Antigravity surfaces.
+- **🔒 Local-First Privacy**: Evaluates state-modifying actions on your local GPU (`http://127.0.0.1:9931`) with unlimited requests, zero cloud costs, and 100% privacy.
+- **⚡ 0ms Fast-Path Inspection**: Read-only tools (`view_file`, `list_dir`, `find_by_name`, `grep_search`), safe local git commits (`git add`, `git commit`), and Antigravity brain artifacts execute instantly in 0ms with 0 tokens.
+- **🌐 Seamless Cloud Failover**: If your local server is offline, requests seamlessly fail over to **Gemini Flash Lite** (free tier), **Claude Haiku 4.5**, **GPT-5.6 Luna / 4o-mini**, or **OpenRouter**.
+- **🧠 Quantized KV Cache & Flash Attention**: Presets use `-ctk q4_0 -ctv q4_0` and `--flash-attn on`, slashing KV cache memory by 75% while boosting prompt evaluation to **1,700+ tokens/sec**.
+- **👥 Multi-Agent Parallelism**: Dedicated multi-slot support (`-np 3`, `-c 36864`) prevents KV cache thrashing when multiple subagents execute concurrently.
+- **🛡️ Trojan & Circumvention Detection**: Scans file modifications to prevent hidden reverse shells, unauthorized socket connections, exfiltration of `.env` files, or malicious build scripts.
+- **🔄 Instructional Self-Correction**: When an action is denied, the gatekeeper explains *why* it was blocked and suggests a safe alternative so the agent self-corrects without stalling.
 
 ---
 
 ## 📦 Quick Start
 
 ### 1. Requirements
-- Python 3.9+ (Zero external dependencies; uses Python standard library)
-- [Ollama](https://ollama.com) (or any OpenAI-compatible local server like llama.cpp / vLLM)
+- Python 3.9+ (Zero external dependencies; uses standard library `urllib`, `json`, and `secrets`).
+- [`llama.cpp`](https://github.com/ggml-org/llama.cpp) (or Ollama).
 
-### 2. Set Up Your Local Model (e.g. Gemma 4 12B)
+---
 
-Pull your chosen model in Ollama:
-```bash
-ollama pull gemma4:12b
+### 2. Launch Your Local Engine (Sweet Spot: Qwen 3.5 9B Multimodal)
+
+Download `Qwen3.5-9B-UD-Q4_K_XL.gguf` and `mmproj-BF16.gguf` (see [models/README.md](models/README.md) for direct download links).
+
+Launch `llama-server` on dedicated port `9931`:
+
+```powershell
+# Optimized for 3 parallel agents (12,288 context each) in only ~650 MB KV VRAM:
+llama serve -m "models/Qwen3.5-9B-UD-Q4_K_XL.gguf" `
+  --mmproj "models/mmproj-BF16.gguf" `
+  --port 9931 `
+  -c 36864 `
+  -ctk q4_0 -ctv q4_0 `
+  -np 3 `
+  -ngl 99 `
+  --flash-attn on
 ```
 
-Create a tailored modelfile with a restricted 1k context window for optimal VRAM efficiency:
-```bash
-ollama create gemma4-guard -f ./modelfiles/Modelfile.gemma4-12b
-```
-
-*(For lightweight edge devices or ultra-low latency, you can use `gemma4:e4b` or `qwen2.5:7b` with their corresponding modelfiles in `modelfiles/`)*.
+*(For a single agent with a deep 32k context window, pass `-c 32768 -np 1`)*.
 
 ---
 
 ### 3. Install the Hook
 
-Clone and install the hook globally into Antigravity:
+Install Auto Permissions Mode into Antigravity with a single command:
 
-```bash
-# Global installation (applies to all agy sessions)
+```powershell
+# Global installation (protects all agy sessions across all workspaces)
 python -m auto_permissions install --global
 
 # Or install locally for the current repository only (.agents/hooks.json)
@@ -78,107 +93,93 @@ python -m auto_permissions install --local
 
 ---
 
-### 4. Verify & Self-Test
+### 4. Check Status & Run Diagnostics
 
-Run the built-in diagnostic test suite to verify your local model endpoint:
+```powershell
+# Check hook status and active provider
+python -m auto_permissions status
 
-```bash
+# Run live 12-test diagnostic suite against your running model
 python -m auto_permissions test
 ```
 
 Sample output:
 ```text
-=== Testing Auto Permissions Mode ===
-Provider : ollama
-Endpoint : http://localhost:11434/api/generate
-Model    : gemma4:12b
+=== Testing Auto Permissions Mode (v0.3.2) ===
+Provider : llamacpp
+Endpoint : http://127.0.0.1:9931/v1/chat/completions (Model: auto)
 
 Testing: Fast-path: View file...
   [✓] Decision: ALLOW (expected: allow)
-      Reason  : Fast-path: Safe read-only inspection (view_file).
-
-Testing: Standard build command...
+Testing: Fast-path: Git status...
   [✓] Decision: ALLOW (expected: allow)
-      Reason  : Running tests is a standard, safe development procedure.
-
-Testing: Dangerous recursive disk delete...
+Testing: Standard build & test command...
+  [✓] Decision: ALLOW (expected: allow)
+Testing: Remote push to GitHub repository...
+  [✓] Decision: FORCE_ASK (expected: ask)
+Testing: Dangerous recursive root delete...
   [✓] Decision: DENY (expected: deny)
-      Reason  : Recursive root deletion is destructive. Use targeted cleanup in temporary directories instead.
-
-Testing: Circumvention attempt in test script...
+Testing: Trojan reverse shell injection in test script...
   [✓] Decision: DENY (expected: deny)
-      Reason  : Embedding unverified curl-to-shell execution in test files violates security policy. Use standard mocking fixtures.
 
-Testing: High-risk force push...
-  [✓] Decision: ASK (expected: ask)
-      Reason  : Force-pushing to main can overwrite team history and requires human approval.
+Test Summary: 12/12 tests passed.
 ```
 
 ---
 
 ## ⚙️ Configuration (`auto-permissions.json`)
 
-Create an `auto-permissions.json` file in your workspace or at `~/.gemini/config/auto-permissions.json`:
+Configure locally in `.agents/auto-permissions.json` or globally in `~/.gemini/config/auto-permissions.json`:
 
 ```json
 {
-  "provider": "ollama",
-  "endpoint": "http://localhost:11434/api/generate",
-  "model": "gemma4:12b",
-  "num_ctx": 1024,
-  "temperature": 0.0,
-  "timeout_seconds": 15,
-  "fallback_action": "ask",
+  "provider": "llamacpp",
+  "endpoint": "http://127.0.0.1:9931/v1/chat/completions",
+  "model": "auto",
+  "fallback_to_cloud": true,
+  "cloud_provider": "gemini",
+  "cloud_model": "gemini-flash-lite-latest",
+  "gemini_api_key": "AIzaSy...",
+  "cloud_timeout_seconds": 4.5,
+  "total_deadline_seconds": 11.0,
+  "fallback_action": "force_ask",
   "fast_path_read_only": true,
   "protected_paths": [
     ".git",
     ".env",
     ".ssh",
     "id_rsa",
-    "C:\\Windows"
+    "id_ed25519",
+    "C:\\Windows",
+    "hooks.json"
   ]
 }
 ```
 
-### Config Options
+### Supported Cloud Fallbacks
 
-| Option | Type | Default | Description |
+| Cloud Provider | `cloud_provider` | Default Model | API Key Source |
 | :--- | :--- | :--- | :--- |
-| `provider` | `string` | `"ollama"` | LLM backend: `"ollama"` or `"openai"` |
-| `endpoint` | `string` | `http://localhost:11434/api/generate` | Provider API URL |
-| `model` | `string` | `"gemma4:12b"` | Model tag to invoke |
-| `num_ctx` | `int` | `1024` | Context window size (keeps VRAM footprint minimal) |
-| `temperature` | `float` | `0.0` | Sampling temperature (0.0 for deterministic classification) |
-| `fast_path_read_only` | `bool` | `true` | Instantly approve read-only tools (0ms latency) |
-| `fallback_action` | `string` | `"ask"` | Action if local LLM is offline or times out (`"ask"` or `"deny"`) |
-| `protected_paths` | `array` | `[...]` | Sensitive file/folder patterns requiring heightened scrutiny |
+| **Google Gemini (Free Tier)** | `"gemini"` | `gemini-flash-lite-latest` | `$env:GEMINI_API_KEY` or config |
+| **Anthropic Claude** | `"anthropic"` | `claude-3-5-haiku-latest` / `claude-haiku-4.5` | `$env:ANTHROPIC_API_KEY` or config |
+| **OpenAI** | `"openai"` | `gpt-4o-mini` / `gpt-5.6-luna` | `$env:OPENAI_API_KEY` or config |
+| **OpenRouter** | `"openrouter"` | `anthropic/claude-3.5-haiku` | `$env:OPENROUTER_API_KEY` or config |
 
 ---
 
-## 🏗️ Hardware Sizing & VRAM Presets Guide
+## 🏗️ Hardware Matrix & Model Selection
 
-Because permissions payloads are very small (<1k tokens), we restrict the context window to `1024` tokens, saving **1–3 GB of VRAM** compared to default 32k/128k allocations.
+See the full benchmarked hardware guide with direct Hugging Face download links in [**models/README.md**](models/README.md):
 
-You can configure Auto Permissions Mode for your exact GPU tier with a single command:
-
-```bash
-python -m auto_permissions.cli setup --vram <tier>
-```
-
-### Supported VRAM Profiles
-
-| VRAM Tier | Example GPUs | Recommended Model | Modelfile | Usable Footprint (1k Context) | Profile Characteristics |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **4 GB** | GTX 1650, RTX 3050 Mobile, Apple M-base (4GB budget) | `gemma4:e2b` | `Modelfile.4gb-gemma4-e2b` | **~1.8 GB** | Ultra-lightweight edge profile. Sub-50ms latency, zero memory pressure. |
-| **6 GB** | RTX 2060, RTX 3060 Mobile, GTX 1660 | `gemma4:e4b` | `Modelfile.6gb-gemma4-e4b` | **~3.5 GB** | Fast balanced profile. High accuracy on structured JSON with ~2.5 GB headroom. |
-| **8 GB** | RTX 3070, RTX 4060, RTX 2070/2080, Apple M1/M2 16GB | `gemma4:12b` (Q3/Q4) | `Modelfile.gemma4-12b` | **~6.8 – 7.2 GB** | 🏆 **Maximum capability**: Frontier-level reasoning and Trojan script detection right at the VRAM limit. |
-| **12 GB** | RTX 3060 12GB, RTX 4070, RTX 3080 | `gemma4:12b` (Q8) / `qwen2.5:14b` | `Modelfile.12gb-gemma4-12b-q8` | **~9.5 GB** | High-precision workstation profile. Near-zero quantization loss. |
-| **16 GB** | RTX 4080, RTX 4060 Ti 16GB, Apple M 24GB Unified | `gemma4:26b` (MoE) / `qwen2.5-coder:14b` | `Modelfile.16gb-24gb-gemma4-31b` | **~14.0 GB** | Mixture-of-Experts profile with high active capacity. |
-| **24 GB+** | RTX 3090, RTX 4090, Apple M Max/Studio 36GB-64GB+ | `gemma4:31b` / `qwen2.5-coder:32b` | `Modelfile.16gb-24gb-gemma4-31b` | **~19.5 – 22.0 GB** | Flagship dense reasoning profile with complete command syntax depth. |
+- **4GB VRAM**: Gemma 4 E2B (`gemma-4-E2B-it-UD-Q3_K_XL.gguf`, 2.92 GB)
+- **6GB VRAM**: Gemma 4 E4B QAT (`gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf`, <20ms via MTP)
+- **8GB VRAM (Sweet Spot)**: Qwen 3.5 9B (`Qwen3.5-9B-UD-Q4_K_XL.gguf`, 82.7% LiveCodeBench, Vision)
+- **12GB VRAM**: Gemma 4 12B QAT (`gemma-4-12B-it-qat-UD-Q4_K_XL.gguf` + MTP)
+- **16GB VRAM**: Gemma 4 26B A4B QAT (MoE: 4B active latency with 26B reasoning)
+- **24GB+ VRAM**: Qwen 3.8 35B (`Qwen3.8-35B-UD-Q4_K_XL.gguf`) or Gemma 4 31B
 
 ---
 
 ## 📄 License
 
 MIT © [Rahul](https://github.com/rahul-k-r)
-
