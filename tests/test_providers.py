@@ -8,6 +8,7 @@ from auto_permissions.providers import (
     OpenAICompatibleProvider,
     OllamaProvider,
     GeminiProvider,
+    AnthropicProvider,
     TieredProvider,
     get_provider,
 )
@@ -87,18 +88,81 @@ class TestProviders(unittest.TestCase):
         self.assertEqual(res["decision"], "allow")
         self.assertEqual(res["reason"], "Gemini verified safe.")
 
+    @patch("urllib.request.urlopen")
+    def test_anthropic_provider_success(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({
+            "content": [{"text": "{\"decision\": \"allow\", \"reason\": \"Claude Haiku approved.\"}"}]
+        }).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        provider = AnthropicProvider(api_key="sk-ant-test", model="claude-3-5-haiku-latest")
+        res = provider.evaluate("system", "prompt")
+        self.assertIsNotNone(res)
+        self.assertEqual(res["decision"], "allow")
+        self.assertEqual(res["reason"], "Claude Haiku approved.")
+
+    @patch("urllib.request.urlopen")
+    def test_openai_cloud_provider_auth(self, mock_urlopen):
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps({
+            "choices": [{"message": {"content": "{\"decision\": \"allow\", \"reason\": \"GPT-4o-mini approved.\"}"}}]
+        }).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        provider = OpenAICompatibleProvider(
+            endpoint="https://api.openai.com/v1/chat/completions",
+            model="gpt-4o-mini",
+            api_key="sk-test-key"
+        )
+        res = provider.evaluate("system", "prompt")
+        self.assertIsNotNone(res)
+        self.assertEqual(res["decision"], "allow")
+        self.assertEqual(res["reason"], "GPT-4o-mini approved.")
+
     def test_get_provider_tiered_wiring(self):
-        cfg = {
+        # 1. Gemini failover
+        cfg_gemini = {
             "provider": "llamacpp",
             "endpoint": "http://127.0.0.1:9931/v1/chat/completions",
             "model": "auto",
             "fallback_to_cloud": True,
+            "cloud_provider": "gemini",
             "cloud_model": "gemini-flash-lite-latest",
         }
-        provider = get_provider(cfg)
-        self.assertIsInstance(provider, TieredProvider)
-        self.assertIsInstance(provider.primary, OpenAICompatibleProvider)
-        self.assertIsInstance(provider.secondary, GeminiProvider)
+        prov1 = get_provider(cfg_gemini)
+        self.assertIsInstance(prov1, TieredProvider)
+        self.assertIsInstance(prov1.primary, OpenAICompatibleProvider)
+        self.assertIsInstance(prov1.secondary, GeminiProvider)
+
+        # 2. Anthropic failover
+        cfg_claude = {
+            "provider": "llamacpp",
+            "endpoint": "http://127.0.0.1:9931/v1/chat/completions",
+            "model": "auto",
+            "fallback_to_cloud": True,
+            "cloud_provider": "anthropic",
+            "cloud_model": "claude-3-5-haiku-latest",
+        }
+        prov2 = get_provider(cfg_claude)
+        self.assertIsInstance(prov2, TieredProvider)
+        self.assertIsInstance(prov2.secondary, AnthropicProvider)
+
+        # 3. OpenAI failover
+        cfg_openai = {
+            "provider": "llamacpp",
+            "endpoint": "http://127.0.0.1:9931/v1/chat/completions",
+            "model": "auto",
+            "fallback_to_cloud": True,
+            "cloud_provider": "openai",
+            "cloud_model": "gpt-4o-mini",
+        }
+        prov3 = get_provider(cfg_openai)
+        self.assertIsInstance(prov3, TieredProvider)
+        self.assertIsInstance(prov3.secondary, OpenAICompatibleProvider)
+        self.assertEqual(prov3.secondary.endpoint, "https://api.openai.com/v1/chat/completions")
 
 if __name__ == "__main__":
     unittest.main()

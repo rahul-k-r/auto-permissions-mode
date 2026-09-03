@@ -9,23 +9,29 @@ from typing import Any, Dict, Optional
 from .base import BaseProvider, parse_json_safely
 
 class OpenAICompatibleProvider(BaseProvider):
-    """Connects to OpenAI-compatible endpoints with auto model resolution and dual-port fallback."""
+    """Connects to OpenAI-compatible endpoints with auto model resolution, remote cloud auth, and dual-port fallback."""
     def __init__(
         self,
         endpoint: str = "http://127.0.0.1:9931/v1/chat/completions",
         model: str = "auto",
+        api_key: Optional[str] = None,
         temperature: float = 0.0,
         timeout: float = 3.5,
     ):
         # Normalize localhost to 127.0.0.1 to avoid Windows IPv6/NetBIOS 1-2.5s DNS delays
         self.endpoint = endpoint.replace("localhost", "127.0.0.1")
         self.model = model
+        self.api_key = api_key
         self.temperature = temperature
         self.timeout = timeout
         self._cached_model_id: Optional[str] = None
 
     def _resolve_model_id(self) -> str:
-        """Resolve model name; auto-detects from /v1/models if model is 'auto' or 'default'."""
+        """Resolve model name; auto-detects from /v1/models if local model is 'auto' or 'default'."""
+        if self.endpoint.startswith("https://"):
+            # Remote cloud endpoint (OpenAI, OpenRouter, Groq)
+            return self.model if self.model not in ("auto", "default") else "gpt-4o-mini"
+
         if self.model and self.model not in ("auto", "default"):
             return self.model
 
@@ -88,15 +94,16 @@ class OpenAICompatibleProvider(BaseProvider):
         data = json.dumps(payload).encode("utf-8")
 
         endpoints_to_try = [self.endpoint]
-        if ":9931" in self.endpoint and self.endpoint.replace(":9931", ":8080") not in endpoints_to_try:
-            endpoints_to_try.append(self.endpoint.replace(":9931", ":8080"))
+        if not self.endpoint.startswith("https://"):
+            if ":9931" in self.endpoint and self.endpoint.replace(":9931", ":8080") not in endpoints_to_try:
+                endpoints_to_try.append(self.endpoint.replace(":9931", ":8080"))
+
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
 
         for ep in endpoints_to_try:
-            req = urllib.request.Request(
-                ep,
-                data=data,
-                headers={"Content-Type": "application/json", "Accept": "application/json"}
-            )
+            req = urllib.request.Request(ep, data=data, headers=headers)
             try:
                 with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                     resp_data = json.loads(resp.read().decode("utf-8"))
