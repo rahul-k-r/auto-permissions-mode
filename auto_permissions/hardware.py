@@ -108,12 +108,15 @@ def detect_hardware() -> Dict[str, Any]:
                 timeout=2.0
             ).strip()
             if out:
-                for line in out.splitlines():
-                    if "Total" in line:
-                        parts = line.split(",")
-                        for p in parts:
-                            if p.strip().isdigit():
-                                bytes_val = int(p.strip())
+                lines = [l.strip() for l in out.splitlines() if l.strip()]
+                if len(lines) >= 2:
+                    headers = [h.strip() for h in lines[0].split(",")]
+                    values = [v.strip() for v in lines[1].split(",")]
+                    for idx, h in enumerate(headers):
+                        if "total" in h.lower() and "used" not in h.lower() and idx < len(values):
+                            val_str = values[idx]
+                            if val_str.isdigit():
+                                bytes_val = int(val_str)
                                 mem_gb = round(bytes_val / (1024.0 ** 3), 1)
                                 result["type"] = "amd"
                                 result["name"] = "AMD Radeon GPU (ROCm)"
@@ -139,11 +142,14 @@ def detect_hardware() -> Dict[str, Any]:
                         with winreg.OpenKey(k, sub) as sk:
                             vals = {}
                             for j in range(winreg.QueryInfoKey(sk)[1]):
-                                vn, vv, _ = winreg.EnumValue(sk, j)
-                                vals[vn] = vv
+                                try:
+                                    vn, vv, _ = winreg.EnumValue(sk, j)
+                                    vals[vn] = vv
+                                except OSError:
+                                    continue
 
                             desc = vals.get("DriverDesc")
-                            if not desc or any(x in desc.lower() for x in ["virtual", "parsec", "superdisplay", "remote", "vga"]):
+                            if not desc or any(x in str(desc).lower() for x in ["virtual", "parsec", "superdisplay", "remote", "vga"]):
                                 continue
 
                             qw = vals.get("HardwareInformation.qwMemorySize")
@@ -151,6 +157,8 @@ def detect_hardware() -> Dict[str, Any]:
                             bytes_val = 0
                             if isinstance(qw, int):
                                 bytes_val = qw
+                            elif isinstance(qw, bytes) and len(qw) == 8:
+                                bytes_val = struct.unpack("<Q", qw)[0]
                             elif isinstance(mem_size, int):
                                 bytes_val = mem_size
                             elif isinstance(mem_size, bytes) and len(mem_size) == 4:
@@ -158,14 +166,22 @@ def detect_hardware() -> Dict[str, Any]:
 
                             if bytes_val > max_vram:
                                 max_vram = bytes_val
-                                best_gpu = desc
-                    except PermissionError:
+                                best_gpu = str(desc)
+                    except (OSError, struct.error, ValueError):
                         continue
 
             if best_gpu and max_vram >= 2 * (1024 ** 3):
                 mem_gb = round(max_vram / (1024.0 ** 3), 1)
                 lower_name = best_gpu.lower()
-                gpu_type = "amd" if ("radeon" in lower_name or "amd" in lower_name) else ("intel" if "intel" in lower_name else "gpu")
+                if "radeon" in lower_name or "amd" in lower_name:
+                    gpu_type = "amd"
+                elif "intel" in lower_name:
+                    gpu_type = "intel"
+                elif "nvidia" in lower_name or "geforce" in lower_name or "rtx" in lower_name:
+                    gpu_type = "nvidia"
+                else:
+                    gpu_type = "gpu"
+
                 result["type"] = gpu_type
                 result["name"] = best_gpu
                 result["memory_gb"] = mem_gb
@@ -174,22 +190,24 @@ def detect_hardware() -> Dict[str, Any]:
         except Exception:
             pass
 
-    # 4. Apple Silicon Unified Memory (macOS)
+    # 4. Apple Silicon Unified Memory (macOS ARM64 only)
     if sys.platform == "darwin":
-        sysctl_bin = shutil.which("sysctl")
-        if sysctl_bin:
-            try:
-                out = subprocess.check_output([sysctl_bin, "-n", "hw.memsize"], text=True, timeout=2.0).strip()
-                if out:
-                    bytes_mem = int(out)
-                    mem_gb = round(bytes_mem / (1024.0 ** 3), 1)
-                    result["type"] = "apple_silicon"
-                    result["name"] = "Apple Silicon (Unified Memory)"
-                    result["memory_gb"] = mem_gb
-                    result["recommended_tier"] = _tier_from_gb(mem_gb * 0.75) # 75% for LLM, 25% for OS/apps
-                    return result
-            except Exception:
-                pass
+        import platform
+        if platform.machine().lower() in ("arm64", "aarch64"):
+            sysctl_bin = shutil.which("sysctl")
+            if sysctl_bin:
+                try:
+                    out = subprocess.check_output([sysctl_bin, "-n", "hw.memsize"], text=True, timeout=2.0).strip()
+                    if out:
+                        bytes_mem = int(out)
+                        mem_gb = round(bytes_mem / (1024.0 ** 3), 1)
+                        result["type"] = "apple_silicon"
+                        result["name"] = "Apple Silicon (Unified Memory)"
+                        result["memory_gb"] = mem_gb
+                        result["recommended_tier"] = _tier_from_gb(mem_gb * 0.75) # 75% for LLM, 25% for OS/apps
+                        return result
+                except Exception:
+                    pass
 
     return result
 
@@ -208,8 +226,10 @@ def download_model(tier: str, target_dir: Optional[Path] = None) -> Optional[Pat
 
     if not target_dir:
         target_dir = Path.home() / ".gemini" / "antigravity" / "models"
+    target_dir = target_dir.resolve()
     target_dir.mkdir(parents=True, exist_ok=True)
     target_file = target_dir / profile["model"]
+    part_file = target_file.with_suffix(".part")
 
     if target_file.is_file() and target_file.stat().st_size > 100 * 1024 * 1024:
         print(f"✓ Model file already exists: {target_file}")
@@ -227,13 +247,18 @@ def download_model(tier: str, target_dir: Optional[Path] = None) -> Optional[Pat
             sys.stdout.flush()
 
     try:
-        urllib.request.urlretrieve(url, target_file, reporthook=reporthook)
+        if part_file.is_file():
+            part_file.unlink(missing_ok=True)
+        urllib.request.urlretrieve(url, part_file, reporthook=reporthook)
+        part_file.replace(target_file)
         print("\n✓ Model downloaded successfully!")
         return target_file
-    except Exception as e:
+    except BaseException as e:
         print(f"\n❌ Error downloading model: {e}")
-        if target_file.is_file():
-            target_file.unlink(missing_ok=True)
+        if part_file.is_file():
+            part_file.unlink(missing_ok=True)
+        if isinstance(e, KeyboardInterrupt):
+            raise
         return None
 
 def create_launcher_script(tier: str, model_path: Optional[Path] = None) -> Path:
@@ -259,9 +284,10 @@ pause
         # Also create a double-clickable monitor dashboard shortcut
         monitor_file = tools_dir / "open-monitor-board.bat"
         venv_py = tools_dir / "auto-permissions-env" / "Scripts" / "python.exe"
+        python_bin = str(venv_py) if venv_py.is_file() else sys.executable
         monitor_content = f"""@echo off
 title Auto Permissions Live Audit Dashboard
-"{venv_py}" -m auto_permissions.cli monitor
+"{python_bin}" -m auto_permissions.cli monitor
 pause
 """
         with open(monitor_file, "w", encoding="utf-8") as f:
@@ -274,8 +300,9 @@ llama serve -m "{resolved_model}" -c {profile['num_ctx']} -ctk q4_0 -ctv q4_0 -n
 """
         monitor_file = tools_dir / "open-monitor-board.sh"
         venv_py = tools_dir / "auto-permissions-env" / "bin" / "python"
+        python_bin = str(venv_py) if venv_py.is_file() else sys.executable
         monitor_content = f"""#!/usr/bin/env bash
-"{venv_py}" -m auto_permissions.cli monitor
+"{python_bin}" -m auto_permissions.cli monitor
 """
         with open(monitor_file, "w", encoding="utf-8") as f:
             f.write(monitor_content)
@@ -303,6 +330,12 @@ def install_desktop_shortcuts() -> Dict[str, str]:
 
     if not desktop.is_dir():
         return created
+
+    # Ensure launcher scripts exist before copying
+    start_script = tools_dir / ("start-local-gatekeeper.bat" if sys.platform == "win32" else "start-local-gatekeeper.sh")
+    if not start_script.is_file():
+        hw = detect_hardware()
+        create_launcher_script(hw.get("recommended_tier", "8gb"))
 
     if sys.platform == "win32":
         for src_name, dst_name in [

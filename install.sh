@@ -127,10 +127,12 @@ if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/pyproject.toml" ]; then
     "$VENV_PYTHON" -m pip install --no-cache-dir "$SCRIPT_DIR" >/dev/null
 else
     echo "Downloading latest release from GitHub..."
-    TEMP_ZIP="/tmp/auto-permissions-main.zip"
+    TEMP_ZIP="$(mktemp -t auto-permissions-XXXXXX.zip)"
+    trap 'rm -f "$TEMP_ZIP"' EXIT
     curl -fsSL "https://github.com/rahul-k-r/auto-permissions-mode/archive/refs/heads/main.zip" -o "$TEMP_ZIP"
     "$VENV_PYTHON" -m pip install --no-cache-dir --force-reinstall "$TEMP_ZIP" >/dev/null
     rm -f "$TEMP_ZIP"
+    trap - EXIT
 fi
 
 INSTALLED_VER="$("$VENV_PYTHON" -m auto_permissions.cli version 2>/dev/null || echo 'v0.3.3')"

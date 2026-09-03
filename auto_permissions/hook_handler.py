@@ -23,9 +23,14 @@ from auto_permissions.evaluator import SecurityEvaluator
 def run_hook() -> None:
     raw_input = sys.stdin.read()
     if not raw_input.strip():
+        print(json.dumps({"decision": "force_ask", "reason": "No input received on hook stdin."}))
         return
 
     config = {}
+    tool_name = "unknown"
+    tool_args = {}
+    context = {}
+
     try:
         config = load_config()
         provider = get_provider(config)
@@ -33,7 +38,7 @@ def run_hook() -> None:
 
         data = json.loads(raw_input)
         tool_call = data.get("toolCall", {})
-        tool_name = tool_call.get("name", "")
+        tool_name = tool_call.get("name", "unknown")
         tool_args = tool_call.get("args", {})
 
         context = {

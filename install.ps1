@@ -106,8 +106,8 @@ if (-not $pyExe) {
         $_.Source -notlike "*WindowsApps*"
     }
     foreach ($cand in $candidates) {
-        $out = & $cand.Source -c "import sys; print(sys.version_info[0])" 2>$null
-        if ($out -eq "3") {
+        $null = & $cand.Source -c "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)" 2>$null
+        if ($LASTEXITCODE -eq 0) {
             $pyExe = $cand.Source
             break
         }
@@ -124,44 +124,47 @@ if (-not $pyExe) {
 $pyVersion = if ($pyExe -eq "py.exe") { & py -3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" } else { & "$pyExe" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" }
 Write-Success "Found Python $pyVersion ($pyExe)"
 
+# Pre-flight check for venv module
 $hasVenv = if ($pyExe -eq "py.exe") { & py -3 -c "import venv; print('ok')" 2>$null } else { & "$pyExe" -c "import venv; print('ok')" 2>$null }
 if ($hasVenv -ne "ok") {
-    Write-Err "The 'venv' module is not available in $pyExe."
+    Write-Err "The 'venv' module is missing from your Python installation."
     exit 1
 }
 
 # -------------------------------------------------------------
 # 2. Manage Isolated Virtual Environment
 # -------------------------------------------------------------
-Write-Step "Managing isolated virtual environment..."
+$installRoot = Join-Path $HOME ".gemini\antigravity\tools"
+$venvDir = Join-Path $installRoot "auto-permissions-env"
+$venvPython = Join-Path $venvDir "Scripts\python.exe"
+
 if (-not (Test-Path $installRoot)) {
     New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
 }
 
-$needsCreate = $true
+$needsVenv = $true
 if (Test-Path $venvPython) {
-    $testVenv = & "$venvPython" -c "import sys; print('ok')" 2>$null
-    if ($testVenv -eq "ok") {
-        $needsCreate = $false
-        Write-Success "Existing virtual environment is healthy."
+    $venvPyVer = & "$venvPython" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+    if ($venvPyVer -eq $pyVersion) {
+        $needsVenv = $false
+        Write-Success "Reusing existing virtual environment: $venvDir"
     } else {
-        Write-Warn "Existing virtual environment appears corrupted. Recreating..."
+        Write-Warn "Existing venv used Python $venvPyVer, but active is $pyVersion. Rebuilding..."
         Remove-Item -Recurse -Force $venvDir -ErrorAction SilentlyContinue
     }
 }
 
-if ($needsCreate) {
-    Write-Host "Creating virtual environment at $venvDir..." -ForegroundColor DarkGray
+if ($needsVenv) {
+    Write-Step "Creating isolated virtual environment at $venvDir..."
     if ($pyExe -eq "py.exe") {
-        & py -3 -m venv "$venvDir" --clear
+        & py -3 -m venv "$venvDir"
     } else {
-        & "$pyExe" -m venv "$venvDir" --clear
+        & "$pyExe" -m venv "$venvDir"
     }
     if (-not (Test-Path $venvPython)) {
         Write-Err "Failed to create virtual environment."
         exit 1
     }
-    Write-Success "Virtual environment created."
 }
 
 # -------------------------------------------------------------
@@ -172,13 +175,21 @@ $isLocalClone = ($PSScriptRoot) -and (Test-Path (Join-Path $PSScriptRoot "pyproj
 
 if ($isLocalClone) {
     Write-Host "Installing from local source: $PSScriptRoot..." -ForegroundColor DarkGray
-    & "$venvPython" -m pip install --no-cache-dir "$PSScriptRoot" | Out-Null
+    & "$venvPython" -m pip install --no-cache-dir "$PSScriptRoot"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err "pip install failed with exit code $LASTEXITCODE"
+        exit 1
+    }
 } else {
     Write-Host "Downloading latest release from GitHub..." -ForegroundColor DarkGray
     $tempZip = Join-Path $env:TEMP "auto-permissions-main.zip"
     try {
         Invoke-RestMethod -Uri "https://github.com/rahul-k-r/auto-permissions-mode/archive/refs/heads/main.zip" -OutFile $tempZip
-        & "$venvPython" -m pip install --no-cache-dir --force-reinstall "$tempZip" | Out-Null
+        & "$venvPython" -m pip install --no-cache-dir --force-reinstall "$tempZip"
+        if ($LASTEXITCODE -ne 0) {
+            Write-Err "pip install failed with exit code $LASTEXITCODE"
+            exit 1
+        }
     } finally {
         if (Test-Path $tempZip) { Remove-Item -Force $tempZip -ErrorAction SilentlyContinue }
     }

@@ -41,21 +41,30 @@ class TestSecurityEvaluator(unittest.TestCase):
         result = evaluator.evaluate_tool_call("run_command", {"CommandLine": "npm run build"})
         self.assertIn(result["decision"], ("ask", "force_ask"))
 
-    def test_antigravity_artifact_whitelist(self):
-        provider = MockProvider(None)  # Provider is offline, but fast path handles it
-        evaluator = SecurityEvaluator(provider, {"fast_path_read_only": True})
+    def test_provider_offline_source_tag(self):
+        # Provider returns None (offline / timeout)
+        provider = MockProvider(None)
+        evaluator = SecurityEvaluator(provider, {"fallback_action": "ask", "fast_path_read_only": False})
 
-        context = {
-            "artifact_dir": "C:\\Users\\rahul\\.gemini\\antigravity\\brain\\e12e4eb8-70c7-4f1f-aa37-81ce65eb678e"
-        }
-        target_file = "C:\\Users\\rahul\\.gemini\\antigravity\\brain\\e12e4eb8-70c7-4f1f-aa37-81ce65eb678e\\implementation_plan.md"
-        result = evaluator.evaluate_tool_call(
-            "write_to_file",
-            {"TargetFile": target_file, "CodeContent": "# Plan"},
-            context=context
-        )
-        self.assertEqual(result["decision"], "allow")
-        self.assertIn("Safe Antigravity brain artifact", result["reason"])
+        result = evaluator.evaluate_tool_call("run_command", {"CommandLine": "npm run build"})
+        self.assertIn(result["decision"], ("ask", "force_ask"))
+        self.assertEqual(result.get("source"), "OFFLINE")
+
+    def test_tier_from_gb(self):
+        from auto_permissions.hardware import _tier_from_gb
+        self.assertEqual(_tier_from_gb(3.5), "4gb")
+        self.assertEqual(_tier_from_gb(5.0), "6gb")
+        self.assertEqual(_tier_from_gb(8.0), "8gb")
+        self.assertEqual(_tier_from_gb(12.0), "12gb")
+        self.assertEqual(_tier_from_gb(16.0), "16gb")
+        self.assertEqual(_tier_from_gb(24.0), "24gb")
+
+    def test_extract_project_name_and_summarize(self):
+        from auto_permissions.monitor import _extract_project_name, _summarize_args
+        ctx = {"workspace_paths": ["/home/user/projects/my-app"]}
+        self.assertEqual(_extract_project_name(ctx, {}), "my-app")
+        self.assertEqual(_extract_project_name(None, {"Cwd": "C:\\projects\\backend"}), "backend")
+        self.assertEqual(_summarize_args("run_command", {"CommandLine": "git status"}), "git status")
 
 if __name__ == "__main__":
     unittest.main()

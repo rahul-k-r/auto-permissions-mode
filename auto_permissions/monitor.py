@@ -7,10 +7,21 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-# Ensure UTF-8 output on Windows terminals
+# Ensure UTF-8 output and enable VT100 processing on Windows terminals
 if hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace") # type: ignore
+    except Exception:
+        pass
+
+if sys.platform == "win32":
+    try:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        hStdOut = kernel32.GetStdHandle(-11)
+        mode = ctypes.c_ulong()
+        kernel32.GetConsoleMode(hStdOut, ctypes.byref(mode))
+        kernel32.SetConsoleMode(hStdOut, mode.value | 0x0004) # ENABLE_VIRTUAL_TERMINAL_PROCESSING
     except Exception:
         pass
 
@@ -53,7 +64,7 @@ def record_audit_event(
     source: str = "LOCAL",
     context: Optional[Dict[str, Any]] = None
 ) -> None:
-    """Append an evaluation event to the audit log in non-blocking fashion (<0.5ms)."""
+    """Append an evaluation event to the audit log in non-blocking fashion with retry (<0.5ms)."""
     try:
         project_name = _extract_project_name(context, tool_args)
         event = {
@@ -68,8 +79,16 @@ def record_audit_event(
             "latency_ms": round(latency_ms, 1),
             "conversation_id": (context or {}).get("conversation_id", "")[:8],
         }
-        with open(get_audit_file(), "a", encoding="utf-8") as f:
-            f.write(json.dumps(event) + "\n")
+        line = json.dumps(event) + "\n"
+        audit_path = get_audit_file()
+        for _ in range(3):
+            try:
+                with open(audit_path, "a", encoding="utf-8") as f:
+                    f.write(line)
+                    f.flush()
+                break
+            except (OSError, PermissionError):
+                time.sleep(0.01)
     except Exception:
         pass
 
@@ -100,10 +119,10 @@ def run_live_board() -> None:
     print("\033[2J\033[H", end="") # Clear screen
 
     term_width = shutil.get_terminal_size((120, 24)).columns
-    term_width = max(term_width, 100)
+    term_width = max(term_width, 80)
 
     print("=" * term_width)
-    print("                              🛡️ AUTO PERMISSIONS MODE — LIVE AUDIT DASHBOARD")
+    print("                              AUTO PERMISSIONS MODE — LIVE AUDIT DASHBOARD")
     print("=" * term_width)
     print(f"Log File : {audit_file}")
     print("Surfaces : Antigravity IDE | Antigravity 2.0 | VS Code Extension | agy CLI (Multi-Workspace)")
@@ -157,10 +176,10 @@ def _print_event_line(raw_json_line: str) -> None:
         # Compute remaining space on current terminal window
         term_width = shutil.get_terminal_size((120, 24)).columns
         fixed_prefix_len = 9 + 3 + 16 + 3 + 10 + 3 + 10 + 3 + 8 + 3 + 14 + 3 # ~82 chars
-        available_target_len = max(30, term_width - fixed_prefix_len - 2)
+        available_target_len = max(15, term_width - fixed_prefix_len - 2)
 
         # In table view, clip if too long to maintain clean alignment
-        display_summary = summary if len(summary) <= available_target_len else summary[:available_target_len - 3] + "..."
+        display_summary = summary if len(summary) <= available_target_len else summary[:max(10, available_target_len - 3)] + "..."
 
         # ANSI Source Badges: AUTO (deterministic fast-path) vs LOCAL-LLM vs FAILOVER vs CLOUD-LLM
         if src in ("FAST-PATH", "FASTPATH", "RULES", "RULE", "AUTO"):
@@ -171,6 +190,10 @@ def _print_event_line(raw_json_line: str) -> None:
             src_badge = "\033[35mFAILOVER  \033[0m" # Magenta (Cloud failover fallback)
         elif src == "CLOUD":
             src_badge = "\033[34mCLOUD-LLM \033[0m" # Blue (Direct Cloud model)
+        elif src == "OFFLINE":
+            src_badge = "\033[31mOFFLINE   \033[0m" # Red (Model server offline)
+        elif src == "TIMEOUT":
+            src_badge = "\033[33mTIMEOUT   \033[0m" # Yellow (Evaluation deadline exceeded)
         else:
             src_badge = f"{src:<10}"
 
