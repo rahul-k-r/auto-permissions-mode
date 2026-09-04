@@ -45,6 +45,92 @@ def _extract_project_name(context: Optional[Dict[str, Any]], args: Dict[str, Any
 
     return "workspace"
 
+_LAST_TRIM_CHECK_TIME = 0.0
+
+def trim_audit_log(
+    retention_days: int = 14,
+    max_lines: int = 5000,
+    audit_path: Optional[Path] = None,
+) -> int:
+    """Trim old entries from the audit log based on retention days and max lines.
+
+    Returns the number of lines pruned.
+    """
+    if audit_path is None:
+        audit_path = get_audit_file()
+    if not audit_path.is_file():
+        return 0
+
+    temp_path = audit_path.with_suffix(".tmp")
+    try:
+        now = time.time()
+        cutoff_timestamp = now - (retention_days * 86400) if retention_days > 0 else 0.0
+
+        with open(audit_path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+
+        total_before = len(lines)
+        surviving = []
+        for line in lines:
+            line_str = line.strip()
+            if not line_str:
+                continue
+            try:
+                data = json.loads(line_str)
+                ts = float(data.get("timestamp", 0))
+                if cutoff_timestamp > 0 and ts > 0 and ts < cutoff_timestamp:
+                    continue  # expired by date
+            except Exception:
+                pass
+            surviving.append(line_str)
+
+        if max_lines > 0 and len(surviving) > max_lines:
+            surviving = surviving[-max_lines:]
+
+        pruned = total_before - len(surviving)
+        if pruned > 0:
+            with open(temp_path, "w", encoding="utf-8") as f:
+                for item in surviving:
+                    f.write(item + "\n")
+                f.flush()
+            temp_path.replace(audit_path)
+
+        return pruned
+    except Exception:
+        return 0
+    finally:
+        if temp_path.is_file():
+            try:
+                temp_path.unlink()
+            except Exception:
+                pass
+
+def _maybe_trim_audit_log(
+    audit_path: Path,
+    config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Lightweight check to run trimming at most once per interval_seconds."""
+    global _LAST_TRIM_CHECK_TIME
+    now = time.time()
+    cfg = config or {}
+    interval = int(cfg.get("audit_trim_interval_seconds", 3600))
+    if now - _LAST_TRIM_CHECK_TIME < interval:
+        return
+
+    _LAST_TRIM_CHECK_TIME = now
+    marker_file = audit_path.parent / ".audit_last_trim"
+    try:
+        if marker_file.is_file():
+            mtime = marker_file.stat().st_mtime
+            if now - mtime < interval:
+                return
+        marker_file.write_text(str(now), encoding="utf-8")
+        retention_days = int(cfg.get("audit_retention_days", 14))
+        max_lines = int(cfg.get("audit_max_lines", 5000))
+        trim_audit_log(retention_days=retention_days, max_lines=max_lines, audit_path=audit_path)
+    except Exception:
+        pass
+
 def record_audit_event(
     tool_name: str,
     tool_args: Dict[str, Any],
@@ -52,7 +138,8 @@ def record_audit_event(
     reason: str,
     latency_ms: float,
     source: str = "LOCAL",
-    context: Optional[Dict[str, Any]] = None
+    context: Optional[Dict[str, Any]] = None,
+    config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Append an evaluation event to the audit log in non-blocking fashion with retry (<0.5ms)."""
     try:
@@ -78,6 +165,8 @@ def record_audit_event(
         with open(audit_path, "a", encoding="utf-8") as f:
             f.write(line)
             f.flush()
+
+        _maybe_trim_audit_log(audit_path, config=config)
     except Exception:
         pass
 
@@ -119,6 +208,19 @@ def run_live_board() -> None:
     print("=" * term_width)
     print(f"{'TIME':<9} | {'PROJECT':<16} | {'SOURCE':<10} | {'DECISION':<10} | {'LATENCY':<8} | {'TOOL':<14} | {'TARGET / COMMAND'}")
     print("-" * term_width)
+
+    # Trim stale entries on monitor startup
+    if audit_file.is_file():
+        try:
+            from auto_permissions.config import load_config
+            cfg = load_config()
+            trim_audit_log(
+                retention_days=int(cfg.get("audit_retention_days", 14)),
+                max_lines=int(cfg.get("audit_max_lines", 5000)),
+                audit_path=audit_file
+            )
+        except Exception:
+            pass
 
     # Display recent events
     last_pos = 0
@@ -193,15 +295,17 @@ def _print_event_line(raw_json_line: str) -> None:
             badge = "\033[32mALLOW     \033[0m"
         elif dec == "DENY":
             badge = "\033[31mDENY      \033[0m"
-        elif "ASK" in dec:
+        elif dec in ("ASK", "QUESTION"):
+            badge = "\033[93mASK       \033[0m"
+        elif dec in ("FORCE_ASK", "FORCEASK"):
             badge = "\033[33mFORCE_ASK \033[0m"
         else:
             badge = f"{dec:<10}"
 
         print(f"{time_str:<9} | {project:<16} | {src_badge} | {badge} | {lat:<8} | {tool:<14} | {display_summary}")
 
-        # If DENY or FORCE_ASK: print the full untruncated command/target AND the reason!
-        if dec in ("DENY", "FORCE_ASK", "ASK"):
+        # If DENY, ASK, or FORCE_ASK: print the full untruncated command/target AND the reason!
+        if dec in ("DENY", "FORCE_ASK", "FORCEASK", "ASK", "QUESTION"):
             # 1. Print full target if it was truncated in the table line
             if len(summary) > available_target_len:
                 print(f"   ↳ 📋 FULL PAYLOAD: \033[97m{summary}\033[0m")
@@ -209,8 +313,18 @@ def _print_event_line(raw_json_line: str) -> None:
             # 2. Print exact reason and safe alternative
             if data.get("reason"):
                 reason_text = data["reason"].strip()
-                prefix = "   ↳ 🛑 REASON: " if dec == "DENY" else "   ↳ ⚠️ CONFIRMATION: "
-                color = "\033[91m" if dec == "DENY" else "\033[93m"
+                if dec == "DENY":
+                    prefix = "   ↳ 🛑 REASON: "
+                    color = "\033[91m"
+                elif dec in ("ASK", "QUESTION"):
+                    prefix = "   ↳ ❓ ALTERNATIVES: "
+                    color = "\033[93m"
+                elif dec in ("FORCE_ASK", "FORCEASK"):
+                    prefix = "   ↳ ⚠️ CONFIRMATION: "
+                    color = "\033[33m"
+                else:
+                    prefix = "   ↳ ℹ️ INFO: "
+                    color = "\033[37m"
                 print(f"{color}{prefix}{reason_text}\033[0m")
     except Exception:
         pass
