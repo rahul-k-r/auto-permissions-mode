@@ -19,6 +19,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "total_deadline_seconds": 18.0,
     "fallback_action": "force_ask",
     "fast_path_read_only": True,
+    "max_tokens": 512,
+    "enable_remediation_directives": True,
+    "audit_retention_days": 14,
+    "audit_max_lines": 5000,
+    "audit_trim_interval_seconds": 3600,
     "protected_paths": [
         ".git",
         ".env",

@@ -59,11 +59,12 @@ def run_hook() -> None:
         record_audit_event(
             tool_name=tool_name,
             tool_args=tool_args,
-            decision=result.get("decision", "unknown"),
+            decision=result.get("audit_decision") or result.get("decision", "unknown"),
             reason=result.get("reason", ""),
             latency_ms=latency_ms,
             source=result.get("source", "LOCAL"),
-            context=context
+            context=context,
+            config=config,
         )
     except Exception:
         pass
