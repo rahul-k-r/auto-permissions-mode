@@ -26,3 +26,6 @@ auto-permissions = "auto_permissions.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["auto_permissions*"]
+
+[tool.setuptools.package-data]
+auto_permissions = ["rules/*.md"]

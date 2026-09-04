@@ -30,6 +30,22 @@ def get_hooks_file(is_global: bool) -> Path:
         p = Path.cwd() / ".agents" / "hooks.json"
     return p
 
+def get_rules_file(is_global: bool) -> Path:
+    if is_global:
+        p = Path.home() / ".gemini" / "config" / "rules" / "interactive_decisions.md"
+    else:
+        p = Path.cwd() / ".agents" / "rules" / "interactive_decisions.md"
+    return p
+
+def get_bundled_rule_content() -> str:
+    pkg_rule = Path(__file__).resolve().parent / "rules" / "interactive_decisions.md"
+    if pkg_rule.is_file():
+        return pkg_rule.read_text(encoding="utf-8")
+    repo_rule = Path(__file__).resolve().parent.parent / ".agents" / "rules" / "interactive_decisions.md"
+    if repo_rule.is_file():
+        return repo_rule.read_text(encoding="utf-8")
+    return ""
+
 def install_hook(is_global: bool) -> bool:
     hook_file = get_hooks_file(is_global)
     hook_file.parent.mkdir(parents=True, exist_ok=True)
@@ -81,6 +97,17 @@ def install_hook(is_global: bool) -> bool:
         print(f"❌ Failed to write hooks file at {hook_file}: {e}")
         return False
 
+    # Install interactive decisions rule
+    rule_file = get_rules_file(is_global)
+    rule_content = get_bundled_rule_content()
+    if rule_content:
+        try:
+            rule_file.parent.mkdir(parents=True, exist_ok=True)
+            rule_file.write_text(rule_content, encoding="utf-8")
+            print(f"✓ Installed agent rule: {rule_file}")
+        except Exception as e:
+            print(f"⚠️ Warning: Could not write rule file {rule_file}: {e}")
+
     target_desc = "globally (~/.gemini/config/hooks.json)" if is_global else "locally in .agents/hooks.json"
     print(f"✓ Successfully installed Auto Permissions Mode {target_desc}!")
     return True
@@ -102,6 +129,15 @@ def uninstall_hook(is_global: bool, purge: bool = False) -> None:
                 print("Auto Permissions Mode hook was not present in file.")
         except Exception as e:
             print(f"Error modifying {hook_file}: {e}")
+
+    # Remove agent rule if present
+    rule_file = get_rules_file(is_global)
+    if rule_file.is_file():
+        try:
+            rule_file.unlink()
+            print(f"✓ Removed agent rule from {rule_file}.")
+        except Exception as e:
+            print(f"Could not remove rule file {rule_file}: {e}")
 
     if purge:
         if is_global:
