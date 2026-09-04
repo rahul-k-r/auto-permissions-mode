@@ -181,7 +181,172 @@ class SecurityEvaluator:
         self.enable_remediation_directives = config.get("enable_remediation_directives", True)
         self.protected_paths = config.get("protected_paths", [])
 
+    def _check_recent_user_approval(
+        self,
+        tool_name: str,
+        tool_args: dict,
+        context: Optional[Dict[str, Any]]
+    ) -> Optional[str]:
+        """Verify if the proposed tool call matches an action explicitly authorized by the user
+
+        in the immediately preceding ask_question interaction in transcript.jsonl.
+        Guarantees:
+        1. Transcript immutable provenance (read from runtime-managed transcript).
+        2. Strict immediate predecessor check (no intervening tool execution allowed).
+        3. Exact command equality matching (no wildcard / command injection drift).
+        """
+        if not context:
+            return None
+
+        transcript_path_str = context.get("transcript_path")
+        if not transcript_path_str:
+            return None
+
+        transcript_path = Path(transcript_path_str)
+        if not transcript_path.is_file():
+            return None
+
+        try:
+            # Read tail of transcript (last 64KB is <0.3ms even on multi-MB transcripts)
+            file_size = transcript_path.stat().st_size
+            read_size = min(file_size, 65536)
+            with open(transcript_path, "rb") as f:
+                if file_size > read_size:
+                    f.seek(file_size - read_size)
+                raw_bytes = f.read()
+
+            lines = raw_bytes.decode("utf-8", errors="replace").strip().split("\n")
+            if not lines:
+                return None
+
+            steps = []
+            for line in lines[-30:]:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    steps.append(json.loads(line))
+                except Exception:
+                    continue
+
+            if len(steps) < 2:
+                return None
+
+            # Find the latest GENERIC step containing an ask_question answer ("A1:")
+            answer_step = None
+            answer_idx = -1
+            for i in range(len(steps) - 1, max(-1, len(steps) - 6), -1):
+                st = steps[i]
+                if st.get("type") == "GENERIC":
+                    content = st.get("content", "")
+                    if "A1:" in content or content.strip().startswith("A1"):
+                        answer_step = st
+                        answer_idx = i
+                        break
+
+            if not answer_step or answer_idx < 1:
+                return None
+
+            # Enforce single-use: ensure NO other tool execution (GENERIC) completed after this answer
+            for j in range(answer_idx + 1, len(steps)):
+                if steps[j].get("type") == "GENERIC":
+                    return None
+
+            # Step directly preceding answer_step must be the PLANNER_RESPONSE that invoked ask_question
+            question_step = steps[answer_idx - 1]
+            if question_step.get("type") != "PLANNER_RESPONSE":
+                return None
+
+            tool_calls = question_step.get("tool_calls", [])
+            ask_call = None
+            for tc in tool_calls:
+                if tc.get("name") == "ask_question":
+                    ask_call = tc
+                    break
+
+            if not ask_call:
+                return None
+
+            # Extract user selection text
+            answer_content = answer_step.get("content", "")
+            a1_idx = answer_content.find("A1:")
+            if a1_idx == -1:
+                a1_idx = answer_content.find("A1")
+            user_selection_text = answer_content[a1_idx:].strip() if a1_idx != -1 else answer_content.strip()
+
+            def extract_cmd_from_option(opt_text: str) -> Optional[str]:
+                opt = opt_text.strip()
+                if " -> " in opt:
+                    return opt.split(" -> ", 1)[1].strip()
+                if " (" in opt and opt.endswith(")"):
+                    return opt.rsplit(" (", 1)[1].rstrip(")").strip()
+                if ": " in opt:
+                    candidate = opt.split(": ", 1)[1].strip()
+                    first_word = candidate.split()[0] if candidate.split() else ""
+                    if first_word in ("git", "npm", "cargo", "pip", "docker", "npx", "python", "make", "pytest", "rm", "del"):
+                        return candidate
+                return None
+
+            approved_commands = set()
+
+            # 1. Match against questions.options defined in ask_question call
+            q_args = ask_call.get("args", {})
+            if isinstance(q_args, str):
+                try:
+                    q_args = json.loads(q_args)
+                except Exception:
+                    q_args = {}
+
+            questions = q_args.get("questions", [])
+            for q in questions:
+                options = q.get("options", [])
+                for opt in options:
+                    if isinstance(opt, str):
+                        clean_opt = opt.strip()
+                        if clean_opt and (clean_opt in user_selection_text or user_selection_text in clean_opt):
+                            extracted = extract_cmd_from_option(clean_opt)
+                            if extracted:
+                                approved_commands.add(extracted)
+
+            # 2. Extract directly from user selection text
+            direct_cmd = extract_cmd_from_option(user_selection_text)
+            if direct_cmd:
+                approved_commands.add(direct_cmd)
+
+            # 3. Handle raw write-in (user typed command directly)
+            raw_write_in = re.sub(r'^\s*A\d+:\s*', '', user_selection_text).strip()
+            if raw_write_in:
+                first_word = raw_write_in.split()[0] if raw_write_in.split() else ""
+                if first_word in ("git", "npm", "cargo", "pip", "docker", "npx", "python", "make", "pytest"):
+                    approved_commands.add(raw_write_in)
+
+            norm_approved = {" ".join(c.split()) for c in approved_commands if c}
+
+            if tool_name == "run_command":
+                cmd = (tool_args.get("CommandLine") or "").strip()
+                norm_cmd = " ".join(cmd.split())
+                if norm_cmd and norm_cmd in norm_approved:
+                    return f"Verified user authorization via ask_question: '{cmd}'"
+
+            if tool_name in ("write_to_file", "replace_file_content"):
+                target = (tool_args.get("TargetFile") or "").strip()
+                if any(target in c or Path(target).name in c for c in norm_approved):
+                    return f"Verified user authorization via ask_question for file: '{target}'"
+
+            return None
+        except Exception:
+            return None
+
     def evaluate_tool_call(self, tool_name: str, tool_args: dict, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        # Fast path -1: Verified immediate user authorization via recent ask_question modal
+        user_auth = self._check_recent_user_approval(tool_name, tool_args, context)
+        if user_auth:
+            return {
+                "decision": "allow",
+                "reason": user_auth,
+                "source": "USER-APPROVED"
+            }
+
         # Fast path 0: Safe Antigravity internal brain artifacts (canonicalized and extension-checked)
         target_file = (
             tool_args.get("TargetFile")

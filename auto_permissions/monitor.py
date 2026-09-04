@@ -272,9 +272,11 @@ def _print_event_line(raw_json_line: str) -> None:
         # In table view, clip if too long to maintain clean alignment
         display_summary = summary if len(summary) <= available_target_len else summary[:max(10, available_target_len - 3)] + "..."
 
-        # ANSI Source Badges: AUTO (deterministic fast-path) vs LOCAL-LLM vs FAILOVER vs CLOUD-LLM
+        # ANSI Source Badges: AUTO (deterministic fast-path) vs USER-APP vs LOCAL-LLM vs FAILOVER vs CLOUD-LLM
         if src in ("FAST-PATH", "FASTPATH", "RULES", "RULE", "AUTO"):
             src_badge = "\033[32mAUTO      \033[0m" # Green (Instant deterministic 0ms auto-approval)
+        elif src in ("USER-APPROVED", "USER-APP", "USER", "APPROVED"):
+            src_badge = "\033[92mUSER-APP  \033[0m" # Bright Green (Explicit user authorization via modal)
         elif src == "LOCAL":
             src_badge = "\033[36mLOCAL-LLM \033[0m" # Cyan (Local Qwen/Gemma GPU inference)
         elif "FAIL" in src:
@@ -304,8 +306,8 @@ def _print_event_line(raw_json_line: str) -> None:
 
         print(f"{time_str:<9} | {project:<16} | {src_badge} | {badge} | {lat:<8} | {tool:<14} | {display_summary}")
 
-        # If DENY, ASK, or FORCE_ASK: print the full untruncated command/target AND the reason!
-        if dec in ("DENY", "FORCE_ASK", "FORCEASK", "ASK", "QUESTION"):
+        # If DENY, ASK, FORCE_ASK, or USER-APPROVED: print the full details AND the reason!
+        if dec in ("DENY", "FORCE_ASK", "FORCEASK", "ASK", "QUESTION") or src in ("USER-APPROVED", "USER-APP", "APPROVED"):
             # 1. Print full target if it was truncated in the table line
             if len(summary) > available_target_len:
                 print(f"   ↳ 📋 FULL PAYLOAD: \033[97m{summary}\033[0m")
@@ -313,7 +315,10 @@ def _print_event_line(raw_json_line: str) -> None:
             # 2. Print exact reason and safe alternative
             if data.get("reason"):
                 reason_text = data["reason"].strip()
-                if dec == "DENY":
+                if src in ("USER-APPROVED", "USER-APP", "APPROVED"):
+                    prefix = "   ↳ 👤 USER-APPROVED: "
+                    color = "\033[92m"
+                elif dec == "DENY":
                     prefix = "   ↳ 🛑 REASON: "
                     color = "\033[91m"
                 elif dec in ("ASK", "QUESTION"):

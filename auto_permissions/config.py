@@ -33,6 +33,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "/etc",
         "C:\\Windows",
         "C:\\Windows\\System32",
+        ".system_generated",
+        "transcript.jsonl",
     ],
 }
 

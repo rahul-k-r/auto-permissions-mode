@@ -188,6 +188,121 @@ class TestSecurityEvaluator(unittest.TestCase):
             self.assertEqual(remaining[0]["tool"], "recent_2")
             self.assertEqual(remaining[1]["tool"], "recent_3")
 
+    def test_user_approval_from_ask_question_transcript(self):
+        import tempfile
+        import json
+        from pathlib import Path
+        provider = MockProvider({"decision": "deny", "reason": "Destructive action blocked"})
+        evaluator = SecurityEvaluator(provider, {"fast_path_read_only": True})
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transcript_file = Path(tmpdir) / "transcript.jsonl"
+
+            # Case 1: Matching approval
+            steps = [
+                {
+                    "step_index": 10,
+                    "type": "PLANNER_RESPONSE",
+                    "tool_calls": [{
+                        "name": "ask_question",
+                        "args": {
+                            "questions": [{
+                                "options": [
+                                    "Discard all changes (git checkout -- .)",
+                                    "Stash changes (git stash)"
+                                ]
+                            }]
+                        }
+                    }]
+                },
+                {
+                    "step_index": 11,
+                    "type": "GENERIC",
+                    "content": "A1: Discard all changes (git checkout -- .)"
+                }
+            ]
+            with open(transcript_file, "w", encoding="utf-8") as f:
+                for s in steps:
+                    f.write(json.dumps(s) + "\n")
+
+            ctx = {"transcript_path": str(transcript_file)}
+            result = evaluator.evaluate_tool_call("run_command", {"CommandLine": "git checkout -- ."}, context=ctx)
+            self.assertEqual(result["decision"], "allow")
+            self.assertEqual(result["source"], "USER-APPROVED")
+            self.assertIn("Verified user authorization", result["reason"])
+
+            # Case 2: Mismatch (user approved git checkout -- ., agent tries git clean -fd)
+            mismatch_result = evaluator.evaluate_tool_call("run_command", {"CommandLine": "git clean -fd"}, context=ctx)
+            self.assertEqual(mismatch_result["decision"], "deny")
+            self.assertNotEqual(mismatch_result.get("source"), "USER-APPROVED")
+
+            # Case 3: Intervening execution (single-use / one-shot invalidated)
+            steps.append({
+                "step_index": 12,
+                "type": "GENERIC",
+                "content": "intervening tool finished"
+            })
+            with open(transcript_file, "w", encoding="utf-8") as f:
+                for s in steps:
+                    f.write(json.dumps(s) + "\n")
+
+            subsequent_result = evaluator.evaluate_tool_call("run_command", {"CommandLine": "git checkout -- ."}, context=ctx)
+            self.assertEqual(subsequent_result["decision"], "deny")
+            self.assertNotEqual(subsequent_result.get("source"), "USER-APPROVED")
+
+            # Case 4: Arrow syntax option ("Preview files" -> git status -s)
+            arrow_steps = [
+                {
+                    "step_index": 20,
+                    "type": "PLANNER_RESPONSE",
+                    "tool_calls": [{
+                        "name": "ask_question",
+                        "args": {
+                            "questions": [{
+                                "options": [
+                                    "- \"Preview files\" -> git status -s",
+                                    "- \"Clean files\" -> git clean -fd"
+                                ]
+                            }]
+                        }
+                    }]
+                },
+                {
+                    "step_index": 21,
+                    "type": "GENERIC",
+                    "content": "A1: - \"Clean files\" -> git clean -fd"
+                }
+            ]
+            with open(transcript_file, "w", encoding="utf-8") as f:
+                for s in arrow_steps:
+                    f.write(json.dumps(s) + "\n")
+
+            arrow_result = evaluator.evaluate_tool_call("run_command", {"CommandLine": "git clean -fd"}, context=ctx)
+            self.assertEqual(arrow_result["decision"], "allow")
+            self.assertEqual(arrow_result["source"], "USER-APPROVED")
+
+            # Case 5: Custom write-in command
+            writein_steps = [
+                {
+                    "step_index": 30,
+                    "type": "PLANNER_RESPONSE",
+                    "tool_calls": [{"name": "ask_question", "args": {}}]
+                },
+                {
+                    "step_index": 31,
+                    "type": "GENERIC",
+                    "content": "A1: git restore --staged src/app.py"
+                }
+            ]
+            with open(transcript_file, "w", encoding="utf-8") as f:
+                for s in writein_steps:
+                    f.write(json.dumps(s) + "\n")
+
+            writein_result = evaluator.evaluate_tool_call("run_command", {"CommandLine": "git restore --staged src/app.py"}, context=ctx)
+            self.assertEqual(writein_result["decision"], "allow")
+            self.assertEqual(writein_result["source"], "USER-APPROVED")
+
 if __name__ == "__main__":
     unittest.main()
+
 
