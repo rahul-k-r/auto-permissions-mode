@@ -14,10 +14,12 @@ class AnthropicProvider(BaseProvider):
         model: str = "claude-3-5-haiku-latest",
         temperature: float = 0.0,
         timeout: float = 4.5,
+        max_tokens: int = 1024,
     ):
         self.model = model
         self.temperature = temperature
         self.timeout = timeout
+        self.max_tokens = max_tokens
         self.api_key = api_key or resolve_api_key("ANTHROPIC_API_KEY", "anthropic_api_key")
 
     def evaluate(self, system_prompt: str, prompt: str) -> Optional[Dict[str, Any]]:
@@ -27,7 +29,7 @@ class AnthropicProvider(BaseProvider):
         url = "https://api.anthropic.com/v1/messages"
         payload = {
             "model": self.model,
-            "max_tokens": 1024,
+            "max_tokens": self.max_tokens,
             "system": system_prompt,
             "messages": [
                 {"role": "user", "content": prompt}

@@ -14,6 +14,7 @@ class OllamaProvider(BaseProvider):
         num_ctx: int = 4096,
         temperature: float = 0.0,
         timeout: float = 3.5,
+        max_tokens: int = 512,
     ):
         self.endpoint = endpoint.replace("localhost", "127.0.0.1")
         if self.endpoint.endswith("/api/generate"):
@@ -22,6 +23,7 @@ class OllamaProvider(BaseProvider):
         self.num_ctx = num_ctx
         self.temperature = temperature
         self.timeout = timeout
+        self.max_tokens = max_tokens
 
         self._cached_model_id: Optional[str] = None
 
@@ -65,7 +67,7 @@ class OllamaProvider(BaseProvider):
             "stream": False,
             "options": {
                 "num_ctx": self.num_ctx,
-                "num_predict": 160,
+                "num_predict": self.max_tokens,
                 "temperature": self.temperature,
             }
         }

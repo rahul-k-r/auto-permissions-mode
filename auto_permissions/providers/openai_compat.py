@@ -17,6 +17,7 @@ class OpenAICompatibleProvider(BaseProvider):
         api_key: Optional[str] = None,
         temperature: float = 0.0,
         timeout: float = 3.5,
+        max_tokens: int = 512,
     ):
         # Normalize localhost to 127.0.0.1 to avoid Windows IPv6/NetBIOS 1-2.5s DNS delays
         self.endpoint = endpoint.replace("localhost", "127.0.0.1")
@@ -24,6 +25,7 @@ class OpenAICompatibleProvider(BaseProvider):
         self.api_key = api_key
         self.temperature = temperature
         self.timeout = timeout
+        self.max_tokens = max_tokens
         self._cached_model_id: Optional[str] = None
 
     def _resolve_model_id(self) -> str:
@@ -101,7 +103,7 @@ class OpenAICompatibleProvider(BaseProvider):
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt}
             ],
-            "max_tokens": 300,
+            "max_tokens": self.max_tokens,
             "temperature": self.temperature,
             "response_format": {"type": "json_object"},
             "chat_template_kwargs": {"enable_thinking": False},

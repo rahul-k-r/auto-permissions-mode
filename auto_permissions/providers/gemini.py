@@ -50,7 +50,18 @@ class GeminiProvider(BaseProvider):
                             "type": "STRING",
                             "enum": ["allow", "deny", "ask", "force_ask"]
                         },
-                        "reason": {"type": "STRING"}
+                        "reason": {"type": "STRING"},
+                        "alternatives": {
+                            "type": "ARRAY",
+                            "items": {
+                                "type": "OBJECT",
+                                "properties": {
+                                    "label": {"type": "STRING"},
+                                    "command": {"type": "STRING"}
+                                },
+                                "required": ["label"]
+                            }
+                        }
                     },
                     "required": ["decision", "reason"]
                 },

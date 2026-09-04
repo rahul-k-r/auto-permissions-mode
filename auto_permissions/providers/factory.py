@@ -17,6 +17,7 @@ def get_provider(config: Dict[str, Any]) -> BaseProvider:
     timeout = float(config.get("timeout_seconds", 3.5))
     temperature = float(config.get("temperature", 0.0))
     num_ctx = int(config.get("num_ctx", 4096))
+    max_tokens = int(config.get("max_tokens", 512))
 
     # Construct primary provider
     if provider_name in ("llamacpp", "openai") or "v1/chat/completions" in endpoint:
@@ -31,6 +32,7 @@ def get_provider(config: Dict[str, Any]) -> BaseProvider:
             api_key=primary_api_key,
             temperature=temperature,
             timeout=timeout,
+            max_tokens=max_tokens,
         )
     elif provider_name == "gemini":
         api_key = config.get("api_key") or config.get("gemini_api_key")
@@ -47,6 +49,7 @@ def get_provider(config: Dict[str, Any]) -> BaseProvider:
             model=model if model not in ("auto", "default") else "claude-3-5-haiku-latest",
             temperature=temperature,
             timeout=timeout,
+            max_tokens=max_tokens,
         )
     else:
         primary = OllamaProvider(
@@ -55,6 +58,7 @@ def get_provider(config: Dict[str, Any]) -> BaseProvider:
             num_ctx=num_ctx,
             temperature=temperature,
             timeout=timeout,
+            max_tokens=max_tokens,
         )
 
     # Check for cloud failover
@@ -71,6 +75,7 @@ def get_provider(config: Dict[str, Any]) -> BaseProvider:
                 model=cloud_model or "claude-3-5-haiku-latest",
                 temperature=temperature,
                 timeout=cloud_timeout,
+                max_tokens=max_tokens,
             )
         elif cloud_provider_name in ("openai", "openrouter", "groq"):
             cloud_endpoint = config.get("cloud_endpoint")
@@ -96,6 +101,7 @@ def get_provider(config: Dict[str, Any]) -> BaseProvider:
                 api_key=cloud_api_key,
                 temperature=temperature,
                 timeout=cloud_timeout,
+                max_tokens=max_tokens,
             )
         else:
             # Default to Gemini
