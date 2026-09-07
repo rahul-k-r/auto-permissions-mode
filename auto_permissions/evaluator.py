@@ -491,7 +491,7 @@ class SecurityEvaluator:
                 if ": " in opt:
                     candidate = opt.split(": ", 1)[1].strip()
                     first_word = candidate.split()[0] if candidate.split() else ""
-                    if first_word in ("git", "npm", "cargo", "pip", "docker", "npx", "python", "make", "pytest", "rm", "del"):
+                    if first_word in ("git", "gh", "npm", "cargo", "pip", "docker", "npx", "python", "make", "pytest", "rm", "del"):
                         return candidate
                 return None
 
@@ -530,7 +530,7 @@ class SecurityEvaluator:
                                 if "." in clean_tok and not clean_tok.startswith("-"):
                                     approved_files.add(clean_tok)
 
-            # 2. Extract command from user selection text if formatted with arrow
+            # 2. Extract command from user selection text if formatted with arrow or parens
             direct_cmd = extract_cmd_from_option(user_selection_text)
             if direct_cmd:
                 approved_commands.add(direct_cmd)
@@ -538,7 +538,7 @@ class SecurityEvaluator:
             # 3. Handle raw write-in (user typed command directly without shell metacharacters)
             if user_clean and not any(ch in user_clean for ch in SHELL_METACHARS):
                 first_word = user_clean.split()[0] if user_clean.split() else ""
-                if first_word in ("git", "npm", "cargo", "pip", "docker", "npx", "python", "make", "pytest"):
+                if first_word in ("git", "gh", "npm", "cargo", "pip", "docker", "npx", "python", "make", "pytest"):
                     approved_commands.add(user_clean)
 
             norm_approved = {" ".join(c.split()) for c in approved_commands if c}
