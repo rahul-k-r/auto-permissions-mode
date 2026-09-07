@@ -366,17 +366,18 @@ class TestSecurityEvaluator(unittest.TestCase):
         })
         self.assertEqual(result_allow["decision"], "allow")
         self.assertEqual(result_allow["source"], "LOCAL")
-        # Strictly scoped override for save_issue
+        # Strictly scoped override for save_issue (never blanket server grant)
         self.assertIn("mcp(linear-mcp-server/save_issue)", result_allow["permission_overrides"])
+        self.assertNotIn("mcp(linear-mcp-server)", result_allow["permission_overrides"])
 
     def test_compute_permission_overrides_helpers(self):
-        # 1. MCP
+        # 1. MCP - must be strictly scoped to tool, no blanket server grant
         mcp_overrides = compute_permission_overrides("call_mcp_tool", {
             "ServerName": "linear-mcp-server",
             "ToolName": "get_issue"
         })
         self.assertIn("mcp(linear-mcp-server/get_issue)", mcp_overrides)
-        self.assertIn("mcp(linear-mcp-server)", mcp_overrides)
+        self.assertNotIn("mcp(linear-mcp-server)", mcp_overrides)
 
         # 2. URL
         url_overrides = compute_permission_overrides("read_url_content", {
@@ -400,6 +401,93 @@ class TestSecurityEvaluator(unittest.TestCase):
         # 5. Empty or non-dict args
         self.assertEqual(compute_permission_overrides("view_file", {}), [])
         self.assertEqual(compute_permission_overrides("call_mcp_tool", None), [])
+
+        # 6. Malicious identifiers with syntax breakout characters
+        malicious_overrides = compute_permission_overrides("call_mcp_tool", {
+            "ServerName": "linear;rm -rf /",
+            "ToolName": "save) or (*"
+        })
+        self.assertEqual(malicious_overrides, [])
+
+        # 7. Malformed URL should not crash
+        bad_url_overrides = compute_permission_overrides("read_url_content", {
+            "Url": "http://[invalid-ipv6"
+        })
+        self.assertEqual(bad_url_overrides, [])
+
+    def test_evaluator_robustness_and_security_edge_cases(self):
+        provider = MockProvider({"decision": "allow", "reason": "ok"})
+        evaluator = SecurityEvaluator(provider, {"fast_path_read_only": True})
+
+        # 1. Null / malformed inputs
+        null_res = evaluator.evaluate_tool_call(None, None)
+        self.assertIn(null_res["decision"], ("ask", "force_ask"))
+
+        # 2. Compound MCP tool names containing mutating verbs (must NOT fast-path)
+        compound_call = {
+            "ServerName": "github-mcp",
+            "ToolName": "get_and_delete_repo",
+            "Arguments": {"repo": "test"}
+        }
+        # In our MockProvider, if it hits the provider, decision is "allow" but source is LOCAL, NOT FAST-PATH
+        compound_res = evaluator.evaluate_tool_call("call_mcp_tool", compound_call)
+        self.assertNotEqual(compound_res["source"], "FAST-PATH")
+        self.assertEqual(compound_res["source"], "LOCAL")
+
+        # Legitimate read-only fast-path
+        safe_read_res = evaluator.evaluate_tool_call("call_mcp_tool", {
+            "ServerName": "github-mcp",
+            "ToolName": "get_issue",
+            "Arguments": {"id": 123}
+        })
+        self.assertEqual(safe_read_res["source"], "FAST-PATH")
+
+        # Empty ServerName or ToolName must not fast path
+        empty_server_res = evaluator.evaluate_tool_call("call_mcp_tool", {
+            "ServerName": "",
+            "ToolName": "get_issue"
+        })
+        self.assertNotEqual(empty_server_res["source"], "FAST-PATH")
+
+    def test_user_approval_negation_and_empty_target(self):
+        import tempfile
+        import json
+        from pathlib import Path
+        provider = MockProvider({"decision": "deny", "reason": "blocked"})
+        evaluator = SecurityEvaluator(provider, {"fast_path_read_only": True})
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            transcript_file = Path(tmpdir) / "transcript.jsonl"
+
+            # Case: User explicitly said NO or DON'T in transcript
+            steps = [
+                {
+                    "step_index": 10,
+                    "type": "PLANNER_RESPONSE",
+                    "tool_calls": [{
+                        "name": "ask_question",
+                        "args": {"questions": [{"options": ["Run git push --force", "Cancel"]}]}
+                    }]
+                },
+                {
+                    "step_index": 11,
+                    "type": "USER_INPUT",
+                    "content": "No, do not run git push --force under any circumstances!"
+                }
+            ]
+            with open(transcript_file, "w", encoding="utf-8") as f:
+                for s in steps:
+                    f.write(json.dumps(s) + "\n")
+
+            ctx = {"transcript_path": str(transcript_file)}
+            res = evaluator.evaluate_tool_call("run_command", {"CommandLine": "git push --force"}, context=ctx)
+            self.assertEqual(res["decision"], "deny")
+            self.assertNotEqual(res.get("source"), "USER-APPROVED")
+
+            # Case: Empty TargetFile must not match
+            res_file = evaluator.evaluate_tool_call("write_to_file", {"TargetFile": ""}, context=ctx)
+            self.assertEqual(res_file["decision"], "deny")
+            self.assertNotEqual(res_file.get("source"), "USER-APPROVED")
 
 if __name__ == "__main__":
     unittest.main()

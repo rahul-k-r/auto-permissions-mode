@@ -8,6 +8,11 @@ def ensure_utf8_console(stdin: bool = False, vt100: bool = False) -> None:
             sys.stdout.reconfigure(encoding="utf-8", errors="replace") # type: ignore
         except Exception:
             pass
+    if hasattr(sys.stderr, "reconfigure"):
+        try:
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace") # type: ignore
+        except Exception:
+            pass
     if stdin and hasattr(sys.stdin, "reconfigure"):
         try:
             sys.stdin.reconfigure(encoding="utf-8", errors="replace") # type: ignore

@@ -61,7 +61,7 @@ def trim_audit_log(
     if not audit_path.is_file():
         return 0
 
-    temp_path = audit_path.with_suffix(".tmp")
+    temp_path = audit_path.parent / f"{audit_path.name}.{os.getpid()}.tmp"
     try:
         now = time.time()
         cutoff_timestamp = now - (retention_days * 86400) if retention_days > 0 else 0.0
@@ -93,7 +93,11 @@ def trim_audit_log(
                 for item in surviving:
                     f.write(item + "\n")
                 f.flush()
-            temp_path.replace(audit_path)
+            try:
+                temp_path.replace(audit_path)
+            except (PermissionError, OSError):
+                # Windows file locking or concurrent process access; abandon trim safely
+                return 0
 
         return pruned
     except Exception:

@@ -40,17 +40,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
 def get_config_search_paths() -> list[Path]:
     paths = []
-    # 1. Current working directory / workspace
-    cwd = Path.cwd()
-    paths.append(cwd / "auto-permissions.json")
-    paths.append(cwd / ".agents" / "auto-permissions.json")
-    
-    # 2. Global user configs
+    # 1. Global user configs (trusted machine/user configuration takes highest precedence)
     home = Path.home()
     paths.append(home / ".gemini" / "config" / "auto-permissions.json")
     paths.append(home / ".config" / "auto-permissions" / "config.json")
-    
-    # 3. Bundled default
+
+    # 2. Bundled default (source repo fallback)
     script_dir = Path(__file__).resolve().parent.parent
     paths.append(script_dir / "config.default.json")
     return paths
@@ -67,4 +62,14 @@ def load_config() -> Dict[str, Any]:
                         break
             except Exception:
                 continue
+
+    # Security guardrails: fallback_action must never be 'allow'
+    if config.get("fallback_action") == "allow":
+        config["fallback_action"] = "force_ask"
+
+    # Ensure critical protected paths are never completely eliminated
+    current_protected = set(config.get("protected_paths", []))
+    default_protected = set(DEFAULT_CONFIG["protected_paths"])
+    config["protected_paths"] = list(current_protected | default_protected)
+
     return config
