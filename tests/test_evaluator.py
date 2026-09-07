@@ -3,7 +3,7 @@
 import unittest
 from typing import Optional, Dict, Any
 from auto_permissions.providers import BaseProvider
-from auto_permissions.evaluator import SecurityEvaluator
+from auto_permissions.evaluator import SecurityEvaluator, compute_permission_overrides
 
 class MockProvider(BaseProvider):
     def __init__(self, mock_response: Any = "DEFAULT"):
@@ -301,6 +301,105 @@ class TestSecurityEvaluator(unittest.TestCase):
             writein_result = evaluator.evaluate_tool_call("run_command", {"CommandLine": "git restore --staged src/app.py"}, context=ctx)
             self.assertEqual(writein_result["decision"], "allow")
             self.assertEqual(writein_result["source"], "USER-APPROVED")
+            self.assertEqual(writein_result["permission_overrides"], ["command(git restore --staged src/app.py)"])
+
+    def test_mcp_read_only_fast_path(self):
+        provider = MockProvider()
+        evaluator = SecurityEvaluator(provider, {"fast_path_read_only": True})
+
+        # 1. Generic dispatch call_mcp_tool get_issue
+        result = evaluator.evaluate_tool_call("call_mcp_tool", {
+            "ServerName": "linear-mcp-server",
+            "ToolName": "get_issue",
+            "Arguments": {"id": "HD-120"}
+        })
+        self.assertEqual(result["decision"], "allow")
+        self.assertEqual(result["source"], "FAST-PATH")
+        self.assertIn("linear-mcp-server/get_issue", result["reason"])
+        self.assertIn("mcp(linear-mcp-server/get_issue)", result["permission_overrides"])
+
+        # 2. list_teams query
+        result_list = evaluator.evaluate_tool_call("call_mcp_tool", {
+            "ServerName": "linear-mcp-server",
+            "ToolName": "list_teams",
+            "Arguments": {}
+        })
+        self.assertEqual(result_list["decision"], "allow")
+        self.assertEqual(result_list["source"], "FAST-PATH")
+        self.assertIn("mcp(linear-mcp-server/list_teams)", result_list["permission_overrides"])
+
+        # 3. Direct eager MCP tool naming (mcp_linear_get_issue)
+        result_eager = evaluator.evaluate_tool_call("mcp_linear_get_issue", {"id": "HD-120"})
+        self.assertEqual(result_eager["decision"], "allow")
+        self.assertEqual(result_eager["source"], "FAST-PATH")
+        self.assertIn("mcp(linear/get_issue)", result_eager["permission_overrides"])
+
+    def test_mcp_mutating_tools_require_llm_evaluation(self):
+        # When model denies a destructive MCP operation
+        provider_deny = MockProvider({
+            "decision": "deny",
+            "reason": "Deleting issue HD-120 is destructive."
+        })
+        evaluator_deny = SecurityEvaluator(provider_deny, {"fast_path_read_only": True})
+
+        result = evaluator_deny.evaluate_tool_call("call_mcp_tool", {
+            "ServerName": "linear-mcp-server",
+            "ToolName": "delete_issue",
+            "Arguments": {"id": "HD-120"}
+        })
+        self.assertEqual(result["decision"], "deny")
+        self.assertEqual(result["source"], "LOCAL")
+        # No permission overrides must ever be emitted on deny!
+        self.assertEqual(result.get("permission_overrides"), [])
+
+        # When model allows a valid MCP modification (e.g. save_issue)
+        provider_allow = MockProvider({
+            "decision": "allow",
+            "reason": "Updating issue title is safe."
+        })
+        evaluator_allow = SecurityEvaluator(provider_allow, {"fast_path_read_only": True})
+
+        result_allow = evaluator_allow.evaluate_tool_call("call_mcp_tool", {
+            "ServerName": "linear-mcp-server",
+            "ToolName": "save_issue",
+            "Arguments": {"id": "HD-120", "title": "Refactor auth"}
+        })
+        self.assertEqual(result_allow["decision"], "allow")
+        self.assertEqual(result_allow["source"], "LOCAL")
+        # Strictly scoped override for save_issue
+        self.assertIn("mcp(linear-mcp-server/save_issue)", result_allow["permission_overrides"])
+
+    def test_compute_permission_overrides_helpers(self):
+        # 1. MCP
+        mcp_overrides = compute_permission_overrides("call_mcp_tool", {
+            "ServerName": "linear-mcp-server",
+            "ToolName": "get_issue"
+        })
+        self.assertIn("mcp(linear-mcp-server/get_issue)", mcp_overrides)
+        self.assertIn("mcp(linear-mcp-server)", mcp_overrides)
+
+        # 2. URL
+        url_overrides = compute_permission_overrides("read_url_content", {
+            "Url": "https://antigravity.google/docs/hooks"
+        })
+        self.assertIn("read_url(antigravity.google)", url_overrides)
+        self.assertIn("url(https://antigravity.google/docs/hooks)", url_overrides)
+
+        # 3. Command
+        cmd_overrides = compute_permission_overrides("run_command", {
+            "CommandLine": "npm test -- --coverage"
+        })
+        self.assertEqual(cmd_overrides, ["command(npm test -- --coverage)"])
+
+        # 4. File edit
+        file_overrides = compute_permission_overrides("write_to_file", {
+            "TargetFile": "src/app.py"
+        })
+        self.assertEqual(file_overrides, ["write_file(src/app.py)"])
+
+        # 5. Empty or non-dict args
+        self.assertEqual(compute_permission_overrides("view_file", {}), [])
+        self.assertEqual(compute_permission_overrides("call_mcp_tool", None), [])
 
 if __name__ == "__main__":
     unittest.main()
