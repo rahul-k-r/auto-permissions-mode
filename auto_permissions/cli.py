@@ -38,6 +38,10 @@ def get_rules_file(is_global: bool) -> Path:
     return p
 
 def get_bundled_rule_content() -> str:
+    # Both copies are intentional, not accidental duplication: auto_permissions/rules/
+    # ships inside the pip package (packaged installs), while .agents/rules/ is what
+    # Antigravity reads natively for a workspace someone develops in directly against
+    # this repo (no `pip install -e .`). Keep both in sync by hand when editing the rule.
     pkg_rule = Path(__file__).resolve().parent / "rules" / "interactive_decisions.md"
     if pkg_rule.is_file():
         return pkg_rule.read_text(encoding="utf-8")
@@ -404,7 +408,7 @@ def verify_hook() -> bool:
 
         result = json.loads(stdout.strip()) if stdout.strip() else {}
         decision = result.get("decision", "").lower()
-        if decision in ("allow", "ask", "force_ask"):
+        if decision in ("allow", "ask", "force_ask", "deny"):
             print("\n===============================================================")
             print(" 🚀 Antigravity PreToolUse Hook: VERIFIED & ACTIVE")
             print("===============================================================")

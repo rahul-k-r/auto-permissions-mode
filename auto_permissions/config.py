@@ -40,12 +40,17 @@ DEFAULT_CONFIG: Dict[str, Any] = {
 
 def get_config_search_paths() -> list[Path]:
     paths = []
-    # 1. Global user configs (trusted machine/user configuration takes highest precedence)
+    # 1. Project-local config (written by `setup --local` / the wizard; overrides global)
+    cwd = Path.cwd()
+    paths.append(cwd / ".agents" / "auto-permissions.json")
+    paths.append(cwd / "auto-permissions.json")
+
+    # 2. Global user configs
     home = Path.home()
     paths.append(home / ".gemini" / "config" / "auto-permissions.json")
     paths.append(home / ".config" / "auto-permissions" / "config.json")
 
-    # 2. Bundled default (source repo fallback)
+    # 3. Bundled default (source repo fallback)
     script_dir = Path(__file__).resolve().parent.parent
     paths.append(script_dir / "config.default.json")
     return paths

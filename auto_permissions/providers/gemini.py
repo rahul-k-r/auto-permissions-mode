@@ -16,10 +16,12 @@ class GeminiProvider(BaseProvider):
         model: str = "gemini-flash-lite-latest",
         temperature: float = 0.0,
         timeout: float = 4.5,
+        max_tokens: int = 512,
     ):
         self.model = model
         self.temperature = temperature
         self.timeout = timeout
+        self.max_tokens = max_tokens
         self.api_key = api_key or resolve_api_key("GEMINI_API_KEY", "gemini_api_key")
 
     @staticmethod
@@ -66,6 +68,7 @@ class GeminiProvider(BaseProvider):
                     "required": ["decision", "reason"]
                 },
                 "temperature": self.temperature,
+                "maxOutputTokens": self.max_tokens,
             }
         }
         req = urllib.request.Request(

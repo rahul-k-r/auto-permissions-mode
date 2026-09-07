@@ -41,6 +41,7 @@ def get_provider(config: Dict[str, Any]) -> BaseProvider:
             model=model if model not in ("auto", "default") else "gemini-flash-lite-latest",
             temperature=temperature,
             timeout=timeout,
+            max_tokens=max_tokens,
         )
     elif provider_name == "anthropic":
         api_key = config.get("api_key") or config.get("anthropic_api_key")
@@ -111,6 +112,7 @@ def get_provider(config: Dict[str, Any]) -> BaseProvider:
                 model=cloud_model or "gemini-flash-lite-latest",
                 temperature=temperature,
                 timeout=cloud_timeout,
+                max_tokens=max_tokens,
             )
 
         total_deadline = float(config.get("total_deadline_seconds", 18.0))

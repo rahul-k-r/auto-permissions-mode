@@ -113,7 +113,16 @@ def _maybe_trim_audit_log(
     audit_path: Path,
     config: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """Lightweight check to run trimming at most once per interval_seconds."""
+    """Lightweight check to run trimming at most once per interval_seconds.
+
+    Runs synchronously in the hook process rather than backgrounded: hook_handler is a
+    short-lived CLI process that exits right after printing its JSON decision, so a
+    daemon thread here would be killed before it could run, and spawning a detached
+    subprocess cross-platform (DETACHED_PROCESS on Windows vs. fork/nohup on POSIX) is
+    not worth the complexity given the cost — the interval/marker-file gate above makes
+    this a single float/mtime comparison on 99.9% of calls, and the trim itself (capped
+    at audit_max_lines, ~1MB) only runs once per interval and takes single-digit ms.
+    """
     global _LAST_TRIM_CHECK_TIME
     now = time.time()
     cfg = config or {}

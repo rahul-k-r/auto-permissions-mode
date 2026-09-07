@@ -85,12 +85,6 @@ def run_hook() -> None:
             "reason": result.get("reason", "")
         }
         overrides = result.get("permission_overrides")
-        if overrides is None and result.get("decision") == "allow":
-            try:
-                from auto_permissions.evaluator import compute_permission_overrides
-                overrides = compute_permission_overrides(tool_name, tool_args)
-            except Exception:
-                overrides = []
         if overrides and result.get("decision") == "allow":
             hook_output["permissionOverrides"] = overrides
         print(json.dumps(hook_output), flush=True)
