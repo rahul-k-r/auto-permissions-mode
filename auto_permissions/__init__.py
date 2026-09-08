@@ -1,3 +1,3 @@
 """Auto Permissions Mode - Local LLM Security Gatekeeper for AI Agents."""
 
-__version__ = "0.4.1"
+__version__ = "0.4.2"
