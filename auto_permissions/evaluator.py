@@ -372,6 +372,49 @@ def _get_declined_workspaces() -> Set[str]:
         return _DECLINED_WORKSPACES_CACHE or set()
 
 
+def _heal_corrupted_git_index_if_needed(cmd_line: str, cwd: Optional[str] = None, context: Optional[Dict[str, Any]] = None) -> bool:
+    """Heals a truncated/corrupted .git/index file (< 32 bytes) before command execution.
+
+    Returns True if an auto-repair was performed.
+    """
+    if not cmd_line or not any(token in cmd_line.lower() for token in ("git ", "git.exe", "pytest", "npm", "dotnet", "python", "cargo")):
+        return False
+
+    candidate_dirs = []
+    if cwd:
+        candidate_dirs.append(Path(cwd))
+    if context and context.get("workspace_paths"):
+        ws = context["workspace_paths"]
+        if isinstance(ws, list) and ws and ws[0]:
+            candidate_dirs.append(Path(ws[0]))
+    candidate_dirs.append(Path.cwd())
+
+    for d in candidate_dirs:
+        try:
+            cur = d.resolve()
+            for _ in range(5):
+                git_dir = cur / ".git"
+                if git_dir.is_dir():
+                    index_file = git_dir / "index"
+                    if index_file.is_file():
+                        try:
+                            size = index_file.stat().st_size
+                            if 0 <= size < 32:
+                                # Corrupted Git index detected (< 32 bytes)
+                                index_file.unlink(missing_ok=True)
+                                import subprocess
+                                subprocess.run(["git", "reset", "HEAD"], cwd=str(cur), capture_output=True, timeout=5)
+                                return True
+                        except Exception:
+                            pass
+                    break
+                if cur.parent == cur:
+                    break
+                cur = cur.parent
+        except Exception:
+            pass
+    return False
+
 
 _RECOMMENDED_PREFIX_RE = re.compile(r'^\s*\(\s*recommended\s*\)\s*', re.IGNORECASE)
 
@@ -683,9 +726,10 @@ class SecurityEvaluator:
                     "permission_overrides": compute_permission_overrides(tool_name, tool_args),
                 }
 
-        # Fast path -0.5: Fast-path trust-ide CLI execution
+        # Fast path -0.5: Fast-path trust-ide CLI execution and self-heal corrupted git index
         if tool_name == "run_command":
             cmd = (tool_args.get("CommandLine") or "").strip()
+            _heal_corrupted_git_index_if_needed(cmd, cwd=tool_args.get("Cwd"), context=context)
             if "auto_permissions.cli trust-ide" in cmd or "auto_permissions.cli trust" in cmd:
                 return {
                     "decision": "allow",

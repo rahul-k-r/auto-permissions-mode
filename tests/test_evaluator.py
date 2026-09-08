@@ -2,10 +2,12 @@
 
 import unittest
 import tempfile
+from tempfile import TemporaryDirectory
 from pathlib import Path
 from unittest.mock import patch
 from typing import Optional, Dict, Any
 from auto_permissions.providers import BaseProvider
+from auto_permissions import evaluator as evaluator_mod
 from auto_permissions.evaluator import SecurityEvaluator, compute_permission_overrides
 
 class MockProvider(BaseProvider):
@@ -531,6 +533,41 @@ class TestSecurityEvaluator(unittest.TestCase):
                 )
                 self.assertEqual(res_trust["decision"], "allow")
                 self.assertEqual(res_trust.get("source"), "FAST-PATH")
+
+    def test_heal_corrupted_git_index(self):
+        with TemporaryDirectory() as tmp:
+            git_dir = Path(tmp) / ".git"
+            git_dir.mkdir(parents=True, exist_ok=True)
+            index_file = git_dir / "index"
+            index_file.write_bytes(b"")
+
+            with patch("subprocess.run") as mock_run:
+                healed = evaluator_mod._heal_corrupted_git_index_if_needed(
+                    "git status",
+                    cwd=tmp,
+                    context={"workspace_paths": [tmp]}
+                )
+                self.assertTrue(healed)
+                self.assertFalse(index_file.exists())
+                mock_run.assert_called_once()
+                self.assertEqual(mock_run.call_args[0][0], ["git", "reset", "HEAD"])
+
+    def test_do_not_heal_valid_git_index(self):
+        with TemporaryDirectory() as tmp:
+            git_dir = Path(tmp) / ".git"
+            git_dir.mkdir(parents=True, exist_ok=True)
+            index_file = git_dir / "index"
+            index_file.write_bytes(b"x" * 64)
+
+            with patch("subprocess.run") as mock_run:
+                healed = evaluator_mod._heal_corrupted_git_index_if_needed(
+                    "git status",
+                    cwd=tmp,
+                    context={"workspace_paths": [tmp]}
+                )
+                self.assertFalse(healed)
+                self.assertTrue(index_file.exists())
+                mock_run.assert_not_called()
 
 
 if __name__ == "__main__":
