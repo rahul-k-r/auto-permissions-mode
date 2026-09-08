@@ -62,4 +62,10 @@ auto-permissions.json
 # Scratch and Internal Notes
 ignore/
 
+# Go build artifacts — built via CI/release workflow, never committed
+*.exe
+*.dll
+/auto-permissions
+/bin/
+
 
