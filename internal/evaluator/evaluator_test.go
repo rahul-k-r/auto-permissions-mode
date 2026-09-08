@@ -693,7 +693,19 @@ func TestComputePermissionOverridesHelpers(t *testing.T) {
 	fileOverrides := evaluator.ComputePermissionOverrides("write_to_file", map[string]interface{}{
 		"TargetFile": "src/app.py",
 	})
-	if len(fileOverrides) != 1 || fileOverrides[0] != "write_file(src/app.py)" {
+	hasWriteFile, hasWriteToFile, hasReplaceFile := false, false, false
+	for _, o := range fileOverrides {
+		if o == "write_file(src/app.py)" {
+			hasWriteFile = true
+		}
+		if o == "write_to_file(src/app.py)" {
+			hasWriteToFile = true
+		}
+		if o == "replace_file_content(src/app.py)" {
+			hasReplaceFile = true
+		}
+	}
+	if !hasWriteFile || !hasWriteToFile || !hasReplaceFile {
 		t.Fatalf("unexpected file overrides: %v", fileOverrides)
 	}
 

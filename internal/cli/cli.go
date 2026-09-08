@@ -223,20 +223,17 @@ func EnableIdeWildcardTrust(workspacePath string) bool {
 			}
 		}
 	}
-	hasCommand, hasMCP := false, false
-	for _, a := range allows {
-		if a == "command(*)" {
-			hasCommand = true
+	for _, rule := range []string{"command(*)", "mcp(*)", "write_file(*)"} {
+		found := false
+		for _, a := range allows {
+			if a == rule {
+				found = true
+				break
+			}
 		}
-		if a == "mcp(*)" {
-			hasMCP = true
+		if !found {
+			allows = append(allows, rule)
 		}
-	}
-	if !hasCommand {
-		allows = append(allows, "command(*)")
-	}
-	if !hasMCP {
-		allows = append(allows, "mcp(*)")
 	}
 	gpg["allow"] = allows
 	userSettings["internetPolicy"] = "AGENT_SETTING_POLICY_ALLOW"
@@ -283,7 +280,7 @@ func EnableIdeWildcardTrust(workspacePath string) bool {
 			}
 		}
 	}
-	for _, w := range []string{"mcp(*)", "read_url(*)", "command(*)"} {
+	for _, w := range []string{"mcp(*)", "read_url(*)", "command(*)", "write_file(*)"} {
 		found := false
 		for _, ex := range setAllows {
 			if ex == w {

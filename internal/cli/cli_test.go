@@ -140,7 +140,7 @@ func TestEnableIdeWildcardTrustCreatesNewSettingsFile(t *testing.T) {
 	}
 	_ = json.Unmarshal(dataSettings, &st)
 
-	hasMCP, hasURL, hasCmd, hasWS := false, false, false, false
+	hasMCP, hasURL, hasCmd, hasWrite, hasWS := false, false, false, false, false
 	for _, a := range st.Permissions.Allow {
 		if a == "mcp(*)" {
 			hasMCP = true
@@ -151,13 +151,16 @@ func TestEnableIdeWildcardTrustCreatesNewSettingsFile(t *testing.T) {
 		if a == "command(*)" {
 			hasCmd = true
 		}
+		if a == "write_file(*)" {
+			hasWrite = true
+		}
 	}
 	for _, ws := range st.TrustedWorkspaces {
 		if strings.EqualFold(ws, myProj) {
 			hasWS = true
 		}
 	}
-	if !hasMCP || !hasURL || !hasCmd || !hasWS {
+	if !hasMCP || !hasURL || !hasCmd || !hasWrite || !hasWS {
 		t.Fatalf("missing expected entries in settings: %+v", st)
 	}
 
@@ -173,12 +176,16 @@ func TestEnableIdeWildcardTrustCreatesNewSettingsFile(t *testing.T) {
 	}
 	_ = json.Unmarshal(dataConfig, &cfg)
 	hasCfgMCP := false
+	hasCfgWrite := false
 	for _, a := range cfg.UserSettings.GlobalPermissionGrants.Allow {
 		if a == "mcp(*)" {
 			hasCfgMCP = true
 		}
+		if a == "write_file(*)" {
+			hasCfgWrite = true
+		}
 	}
-	if !hasCfgMCP || cfg.UserSettings.InternetPolicy != "AGENT_SETTING_POLICY_ALLOW" {
+	if !hasCfgMCP || !hasCfgWrite || cfg.UserSettings.InternetPolicy != "AGENT_SETTING_POLICY_ALLOW" {
 		t.Fatalf("unexpected ide config: %+v", cfg)
 	}
 
