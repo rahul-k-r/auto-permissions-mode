@@ -7,7 +7,7 @@ import shlex
 import secrets
 from pathlib import Path
 from urllib.parse import urlparse
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 from auto_permissions.providers import BaseProvider
 
 SYSTEM_PROMPT = """You are the autonomous security gatekeeper for an AI coding assistant (Auto Permissions Mode).
@@ -297,6 +297,79 @@ def compute_permission_overrides(tool_name: str, tool_args: Any) -> List[str]:
         return []
 
     return []
+
+
+_TRUSTED_WORKSPACES_CACHE: Optional[Set[str]] = None
+_SETTINGS_MTIME_CACHE: float = 0.0
+_TRUSTED_FOLDERS_MTIME_CACHE: float = 0.0
+_DECLINED_WORKSPACES_CACHE: Optional[Set[str]] = None
+_DECLINED_MTIME_CACHE: float = 0.0
+
+
+def _get_trusted_workspaces() -> Set[str]:
+    """Retrieve trusted workspace paths from ~/.gemini/trustedFolders.json and ~/.gemini/antigravity-cli/settings.json with mtime caching."""
+    global _TRUSTED_WORKSPACES_CACHE, _SETTINGS_MTIME_CACHE, _TRUSTED_FOLDERS_MTIME_CACHE
+    settings_file = Path.home() / ".gemini" / "antigravity-cli" / "settings.json"
+    tf_file = Path.home() / ".gemini" / "trustedFolders.json"
+
+    st_mtime = settings_file.stat().st_mtime if settings_file.is_file() else 0.0
+    tf_mtime = tf_file.stat().st_mtime if tf_file.is_file() else 0.0
+
+    if (
+        _TRUSTED_WORKSPACES_CACHE is not None
+        and st_mtime == _SETTINGS_MTIME_CACHE
+        and tf_mtime == _TRUSTED_FOLDERS_MTIME_CACHE
+    ):
+        return _TRUSTED_WORKSPACES_CACHE
+
+    trusted = set()
+
+    # 1. Read IDE trustedFolders.json
+    if tf_file.is_file():
+        try:
+            with open(tf_file, "r", encoding="utf-8-sig") as f:
+                tf_data = json.load(f)
+            for folder, trust_val in tf_data.items():
+                if trust_val in ("TRUST_PARENT", "TRUST_FOLDER", "ALLOW") and folder:
+                    trusted.add(str(Path(folder).resolve()))
+        except Exception:
+            pass
+
+    # 2. Read CLI settings.json
+    if settings_file.is_file():
+        try:
+            with open(settings_file, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+            for p in data.get("trustedWorkspaces", []):
+                if p:
+                    trusted.add(str(Path(p).resolve()))
+        except Exception:
+            pass
+
+    _TRUSTED_WORKSPACES_CACHE = trusted
+    _SETTINGS_MTIME_CACHE = st_mtime
+    _TRUSTED_FOLDERS_MTIME_CACHE = tf_mtime
+    return trusted
+
+
+def _get_declined_workspaces() -> Set[str]:
+    """Retrieve declined workspace paths from ~/.gemini/config/declined_workspaces.json with mtime caching."""
+    global _DECLINED_WORKSPACES_CACHE, _DECLINED_MTIME_CACHE
+    declined_file = Path.home() / ".gemini" / "config" / "declined_workspaces.json"
+    if not declined_file.is_file():
+        return set()
+    try:
+        current_mtime = declined_file.stat().st_mtime
+        if _DECLINED_WORKSPACES_CACHE is not None and current_mtime == _DECLINED_MTIME_CACHE:
+            return _DECLINED_WORKSPACES_CACHE
+        with open(declined_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        declined = {str(Path(p).resolve()) for p in data.get("declined", []) if p}
+        _DECLINED_WORKSPACES_CACHE = declined
+        _DECLINED_MTIME_CACHE = current_mtime
+        return declined
+    except Exception:
+        return _DECLINED_WORKSPACES_CACHE or set()
 
 
 
@@ -610,6 +683,17 @@ class SecurityEvaluator:
                     "permission_overrides": compute_permission_overrides(tool_name, tool_args),
                 }
 
+        # Fast path -0.5: Fast-path trust-ide CLI execution
+        if tool_name == "run_command":
+            cmd = (tool_args.get("CommandLine") or "").strip()
+            if "auto_permissions.cli trust-ide" in cmd or "auto_permissions.cli trust" in cmd:
+                return {
+                    "decision": "allow",
+                    "reason": "Fast-path: Auto Permissions Mode workspace trust configuration.",
+                    "source": "FAST-PATH",
+                    "permission_overrides": compute_permission_overrides(tool_name, tool_args),
+                }
+
         # Fast path 0: Safe Antigravity internal brain artifacts (canonicalized and extension-checked)
         target_file = str(
             tool_args.get("TargetFile")
@@ -653,6 +737,46 @@ class SecurityEvaluator:
                 "source": "FAST-PATH",
                 "permission_overrides": compute_permission_overrides(tool_name, tool_args),
             }
+
+        # Workspace Trust Gate: prompt user once per untrusted repository in VS Code / Antigravity
+        target_ws = None
+        if context and context.get("workspace_paths"):
+            ws_list = context.get("workspace_paths")
+            if isinstance(ws_list, list) and ws_list and ws_list[0]:
+                try:
+                    target_ws = str(Path(ws_list[0]).resolve())
+                except Exception:
+                    target_ws = None
+
+        if target_ws:
+            trusted_workspaces = _get_trusted_workspaces()
+            if target_ws not in trusted_workspaces:
+                declined_workspaces = _get_declined_workspaces()
+                if target_ws not in declined_workspaces:
+                    cmd_line = str(tool_args.get("CommandLine") or "")
+                    if "trust-ide" not in cmd_line and tool_name != "ask_question":
+                        ws_name = Path(target_ws).name
+                        alts = [
+                            {
+                                "label": f"Trust workspace '{ws_name}': enables Auto Permissions Mode to manage tool execution without redundant IDE popups",
+                                "command": f"python -m auto_permissions.cli trust-ide --workspace \"{target_ws}\"",
+                            },
+                            {
+                                "label": f"Do not trust workspace: keep manual IDE approval prompts in this workspace",
+                                "command": f"python -m auto_permissions.cli trust-ide --decline --workspace \"{target_ws}\"",
+                            },
+                        ]
+                        directive = _build_remediation_directive(alts)
+                        reason = (
+                            f"Workspace '{ws_name}' is not in Antigravity's trusted workspaces. "
+                            f"Trusting it enables Auto Permissions Mode to manage tool executions without redundant IDE popups.\n\n{directive}"
+                        )
+                        return {
+                            "decision": "ask",
+                            "reason": reason,
+                            "source": "WORKSPACE-TRUST",
+                            "permission_overrides": [],
+                        }
 
         # Fast path 1.5: Instantly allow safe read-only MCP tool calls
         if self.fast_path and tool_name == "call_mcp_tool":

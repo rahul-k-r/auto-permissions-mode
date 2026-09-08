@@ -1,6 +1,9 @@
 """Unit tests for Auto Permissions Security Evaluator."""
 
 import unittest
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
 from typing import Optional, Dict, Any
 from auto_permissions.providers import BaseProvider
 from auto_permissions.evaluator import SecurityEvaluator, compute_permission_overrides
@@ -488,6 +491,47 @@ class TestSecurityEvaluator(unittest.TestCase):
             res_file = evaluator.evaluate_tool_call("write_to_file", {"TargetFile": ""}, context=ctx)
             self.assertEqual(res_file["decision"], "deny")
             self.assertNotEqual(res_file.get("source"), "USER-APPROVED")
+
+    def test_workspace_trust_gate(self):
+        provider = MockProvider({"decision": "allow", "reason": "ok"})
+        evaluator = SecurityEvaluator(provider, {"fast_path_read_only": True})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            fake_ws = str((Path(tmp) / "untrusted_repo").resolve())
+            ctx = {"workspace_paths": [fake_ws]}
+
+            # 1. Untrusted workspace -> triggers WORKSPACE-TRUST ask with remediation directive
+            with patch("auto_permissions.evaluator._get_trusted_workspaces", return_value=set()), \
+                 patch("auto_permissions.evaluator._get_declined_workspaces", return_value=set()):
+                res = evaluator.evaluate_tool_call("run_command", {"CommandLine": "npm test"}, context=ctx)
+                self.assertEqual(res["decision"], "ask")
+                self.assertEqual(res.get("source"), "WORKSPACE-TRUST")
+                self.assertIn("trust-ide", res["reason"])
+                self.assertIn("REMEDIATION DIRECTIVE", res["reason"])
+
+            # 2. Trusted workspace -> normal evaluation (does not prompt workspace trust)
+            with patch("auto_permissions.evaluator._get_trusted_workspaces", return_value={fake_ws}), \
+                 patch("auto_permissions.evaluator._get_declined_workspaces", return_value=set()):
+                res = evaluator.evaluate_tool_call("run_command", {"CommandLine": "npm test"}, context=ctx)
+                self.assertNotEqual(res.get("source"), "WORKSPACE-TRUST")
+
+            # 3. Declined workspace -> does not prompt for workspace trust
+            with patch("auto_permissions.evaluator._get_trusted_workspaces", return_value=set()), \
+                 patch("auto_permissions.evaluator._get_declined_workspaces", return_value={fake_ws}):
+                res = evaluator.evaluate_tool_call("run_command", {"CommandLine": "npm test"}, context=ctx)
+                self.assertNotEqual(res.get("source"), "WORKSPACE-TRUST")
+
+            # 4. trust-ide command itself fast-paths as ALLOW even in untrusted workspace
+            with patch("auto_permissions.evaluator._get_trusted_workspaces", return_value=set()), \
+                 patch("auto_permissions.evaluator._get_declined_workspaces", return_value=set()):
+                res_trust = evaluator.evaluate_tool_call(
+                    "run_command",
+                    {"CommandLine": f"python -m auto_permissions.cli trust-ide --workspace \"{fake_ws}\""},
+                    context=ctx
+                )
+                self.assertEqual(res_trust["decision"], "allow")
+                self.assertEqual(res_trust.get("source"), "FAST-PATH")
+
 
 if __name__ == "__main__":
     unittest.main()

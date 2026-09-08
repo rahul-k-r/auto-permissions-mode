@@ -6,6 +6,7 @@ import json
 import time
 import argparse
 from pathlib import Path
+from typing import Optional
 
 from auto_permissions._console import ensure_utf8_console
 ensure_utf8_console()
@@ -49,6 +50,184 @@ def get_bundled_rule_content() -> str:
     if repo_rule.is_file():
         return repo_rule.read_text(encoding="utf-8")
     return ""
+
+def get_antigravity_cli_settings_file() -> Path:
+    return Path.home() / ".gemini" / "antigravity-cli" / "settings.json"
+
+def get_antigravity_config_file() -> Path:
+    return Path.home() / ".gemini" / "config" / "config.json"
+
+def get_antigravity_trusted_folders_file() -> Path:
+    return Path.home() / ".gemini" / "trustedFolders.json"
+
+def get_declined_workspaces_file() -> Path:
+    return Path.home() / ".gemini" / "config" / "declined_workspaces.json"
+
+def is_workspace_trusted(workspace_path: Optional[str] = None) -> bool:
+    target = str(Path(workspace_path).resolve() if workspace_path else Path.cwd().resolve())
+    target_norm = target.replace("\\", "/").lower()
+
+    # 1. Check IDE trustedFolders.json
+    trusted_folders_file = get_antigravity_trusted_folders_file()
+    if trusted_folders_file.is_file():
+        try:
+            with open(trusted_folders_file, "r", encoding="utf-8") as f:
+                tf_data = json.load(f)
+            for folder, trust_val in tf_data.items():
+                if trust_val in ("TRUST_PARENT", "TRUST_FOLDER", "ALLOW"):
+                    folder_norm = str(Path(folder).resolve()).replace("\\", "/").lower()
+                    if folder_norm == target_norm:
+                        return True
+        except Exception:
+            pass
+
+    # 2. Check Antigravity CLI settings.json
+    settings_file = get_antigravity_cli_settings_file()
+    if settings_file.is_file():
+        try:
+            with open(settings_file, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+            trusted = data.get("trustedWorkspaces", [])
+            if any(str(Path(p).resolve()) == target for p in trusted if p):
+                return True
+        except Exception:
+            pass
+
+    return False
+
+def is_workspace_declined(workspace_path: Optional[str] = None) -> bool:
+    declined_file = get_declined_workspaces_file()
+    if not declined_file.is_file():
+        return False
+    target = str(Path(workspace_path).resolve() if workspace_path else Path.cwd().resolve())
+    try:
+        with open(declined_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        declined = data.get("declined", [])
+        return any(str(Path(p).resolve()) == target for p in declined if p)
+    except Exception:
+        return False
+
+def enable_ide_wildcard_trust(workspace_path: Optional[str] = None) -> bool:
+    target_ws = str(Path(workspace_path).resolve() if workspace_path else Path.cwd().resolve())
+    target_ws_norm = target_ws.replace("\\", "/").lower()
+    success = True
+
+    # 1. Update Antigravity IDE config.json (globalPermissionGrants + internetPolicy)
+    config_file = get_antigravity_config_file()
+    try:
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        config_data = {}
+        if config_file.is_file():
+            try:
+                with open(config_file, "r", encoding="utf-8-sig") as f:
+                    config_data = json.load(f)
+                bak_file = config_file.with_suffix(".json.bak")
+                with open(bak_file, "w", encoding="utf-8") as f:
+                    json.dump(config_data, f, indent=2)
+            except Exception:
+                config_data = {}
+
+        user_settings = config_data.setdefault("userSettings", {})
+        gpg = user_settings.setdefault("globalPermissionGrants", {})
+        gpg_allows = gpg.setdefault("allow", [])
+        for rule in ("command(*)", "mcp(*)"):
+            if rule not in gpg_allows:
+                gpg_allows.append(rule)
+        user_settings["internetPolicy"] = "AGENT_SETTING_POLICY_ALLOW"
+        user_settings["nonWorkspaceFileAccessPolicy"] = "AGENT_SETTING_POLICY_ALLOW"
+
+        with open(config_file, "w", encoding="utf-8") as f:
+            json.dump(config_data, f, indent=2)
+        print(f"✓ Enabled IDE wildcard tool permissions in: {config_file}")
+    except Exception as e:
+        print(f"⚠️ Failed to update {config_file}: {e}")
+        success = False
+
+    # 2. Update Antigravity trustedFolders.json
+    tf_file = get_antigravity_trusted_folders_file()
+    try:
+        tf_file.parent.mkdir(parents=True, exist_ok=True)
+        tf_data = {}
+        if tf_file.is_file():
+            try:
+                with open(tf_file, "r", encoding="utf-8-sig") as f:
+                    tf_data = json.load(f)
+                bak_tf = tf_file.with_suffix(".json.bak")
+                with open(bak_tf, "w", encoding="utf-8") as f:
+                    json.dump(tf_data, f, indent=2)
+            except Exception:
+                tf_data = {}
+
+        tf_data[target_ws_norm] = "TRUST_PARENT"
+        with open(tf_file, "w", encoding="utf-8") as f:
+            json.dump(tf_data, f, indent=2)
+        print(f"✓ Registered workspace trust in: {tf_file}")
+    except Exception as e:
+        print(f"⚠️ Failed to update {tf_file}: {e}")
+        success = False
+
+    # 3. Update Antigravity CLI settings.json (for agy.exe CLI compatibility)
+    settings_file = get_antigravity_cli_settings_file()
+    try:
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+        data = {}
+        if settings_file.is_file():
+            try:
+                with open(settings_file, "r", encoding="utf-8-sig") as f:
+                    data = json.load(f)
+                backup_file = settings_file.with_suffix(".json.bak")
+                with open(backup_file, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2)
+            except Exception:
+                data = {}
+
+        perms = data.setdefault("permissions", {})
+        allows = perms.setdefault("allow", [])
+        wildcards = ["mcp(*)", "read_url(*)", "command(*)"]
+        for w in wildcards:
+            if w not in allows:
+                allows.append(w)
+
+        trusted = data.setdefault("trustedWorkspaces", [])
+        trusted_resolved = {str(Path(p).resolve()) for p in trusted if p}
+        if target_ws not in trusted_resolved:
+            trusted.append(target_ws)
+
+        with open(settings_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        print(f"✓ Enabled CLI wildcard trust in: {settings_file}")
+        print(f"✓ Registered trusted workspace : {target_ws}")
+    except Exception as e:
+        print(f"⚠️ Failed to update {settings_file}: {e}")
+        success = False
+
+    return success
+
+def decline_ide_workspace_trust(workspace_path: Optional[str] = None) -> bool:
+    declined_file = get_declined_workspaces_file()
+    declined_file.parent.mkdir(parents=True, exist_ok=True)
+    target = str(Path(workspace_path).resolve() if workspace_path else Path.cwd().resolve())
+    data = {"declined": []}
+    if declined_file.is_file():
+        try:
+            with open(declined_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            data = {"declined": []}
+
+    declined_set = {str(Path(p).resolve()) for p in data.get("declined", []) if p}
+    declined_set.add(target)
+    data["declined"] = sorted(list(declined_set))
+
+    try:
+        with open(declined_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        print(f"✓ Workspace marked as untrusted (manual prompts retained): {target}")
+        return True
+    except Exception as e:
+        print(f"❌ Failed to record declined workspace: {e}")
+        return False
 
 def install_hook(is_global: bool) -> bool:
     hook_file = get_hooks_file(is_global)
@@ -462,6 +641,10 @@ def main() -> None:
     subparsers.add_parser("shortcuts", help="Create or refresh one-click shortcuts on your Desktop")
     subparsers.add_parser("verify", help="Verify live Antigravity hook pipeline bridge")
 
+    trust_p = subparsers.add_parser("trust-ide", aliases=["trust"], help="Trust workspace in Antigravity and enable wildcard rules")
+    trust_p.add_argument("--workspace", type=str, default=None, help="Target workspace path (defaults to current working directory)")
+    trust_p.add_argument("--decline", action="store_true", help="Decline trusting this workspace and retain manual prompts")
+
     args = parser.parse_args()
 
     if args.command == "version":
@@ -498,6 +681,13 @@ def main() -> None:
     elif args.command == "verify":
         if not verify_hook():
             sys.exit(1)
+    elif args.command in ("trust-ide", "trust"):
+        if getattr(args, "decline", False):
+            if not decline_ide_workspace_trust(args.workspace):
+                sys.exit(1)
+        else:
+            if not enable_ide_wildcard_trust(args.workspace):
+                sys.exit(1)
     else:
         parser.print_help()
 
