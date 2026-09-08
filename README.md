@@ -166,6 +166,49 @@ Once installed, the PreToolUse security gatekeeper is active across all Google A
 
 ---
 
+### IDE & VS Code Integration (Zero Redundant Prompts)
+
+To allow Auto Permissions Mode to act as the sole intelligent gatekeeper without the IDE interrupting with redundant native permission modals:
+
+1. **Trust the Workspace & Inject Wildcard Grants**:
+   ```powershell
+   auto-permissions trust-ide
+   ```
+   This automatically:
+   - Registers your workspace in `~/.gemini/trustedFolders.json` (`TRUST_PARENT`).
+   - Injects wildcard tool permissions (`mcp(*)`, `command(*)`, `internetPolicy: "AGENT_SETTING_POLICY_ALLOW"`) into `~/.gemini/config/config.json`.
+   - Adds wildcard permissions to `~/.gemini/antigravity-cli/settings.json` for CLI compatibility.
+
+2. **Set Security Preset**:
+   - Open **Agent Settings** (Gear icon in the Antigravity sidebar) and select **Turbo Mode**.
+
+---
+
+### 💡 Pro-Tip: Preventing Git Index Corruption (Claude Code-Style Direct Edits)
+
+On Windows, developers using Antigravity often encounter:
+```text
+fatal: .git/index: index file smaller than expected
+```
+
+#### Why This Happens in Antigravity (and Not Claude Code)
+- **Claude Code** applies code modifications as **direct, clean filesystem writes**. VS Code's background git watcher detects the file update normally without lock collisions.
+- **Antigravity (`agy`)**, by default, injects an in-memory **Visual Diff Overlay with accept/reject CodeLenses** (`jetski.resolvedHunks`) over the editor buffer. When hunks are accepted or rejected, Antigravity flushes the diff while VS Code's background git watcher (`vscode.git`) is simultaneously scanning the repository. On Windows NTFS, this file-locking race condition can truncate `.git/index` to 0 bytes.
+
+#### The Permanent Fix:
+To make Antigravity apply code changes directly without the pending hunk review state—matching **Claude Code's seamless behavior**—add this to your VS Code User settings (`settings.json`):
+
+```json
+{
+  "antigravity.enableInlineDiff": false
+}
+```
+
+#### Built-in Autonomous Self-Healing:
+Auto Permissions Mode includes an autonomous safety shield. Whenever any `git` command is evaluated, if `.git/index` is detected to be corrupted ($< 32$ bytes), the engine **automatically removes the corrupted index and rebuilds it from `HEAD` before executing the command**. No manual recovery needed.
+
+---
+
 ### Status and Live Diagnostics
 
 ```powershell
