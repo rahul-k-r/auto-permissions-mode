@@ -60,7 +60,7 @@ func RunHook(reader io.Reader, writer io.Writer) (err error) {
 				Reason:   reason,
 			}
 			b, _ := json.Marshal(out)
-			fmt.Fprintln(writer, string(b))
+			_, _ = fmt.Fprintln(writer, string(b))
 			err = nil
 		}
 	}()
@@ -72,7 +72,7 @@ func RunHook(reader io.Reader, writer io.Writer) (err error) {
 			Reason:   "No input received on hook stdin.",
 		}
 		b, _ := json.Marshal(out)
-		fmt.Fprintln(writer, string(b))
+		_, _ = fmt.Fprintln(writer, string(b))
 		return nil
 	}
 
@@ -93,7 +93,7 @@ func RunHook(reader io.Reader, writer io.Writer) (err error) {
 			Reason:   reason,
 		}
 		b, _ := json.Marshal(out)
-		fmt.Fprintln(writer, string(b))
+		_, _ = fmt.Fprintln(writer, string(b))
 		return nil
 	}
 
@@ -164,6 +164,6 @@ func RunHook(reader io.Reader, writer io.Writer) (err error) {
 	}
 
 	b, _ := json.Marshal(hookOutput)
-	fmt.Fprintln(writer, string(b))
+	_, _ = fmt.Fprintln(writer, string(b))
 	return nil
 }

@@ -15,7 +15,7 @@ func TestRuleFilePaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cli.GetCwdHook = func() string { return tmpDir }
 	cli.GetHomeHook = func() string { return tmpDir }
@@ -47,7 +47,7 @@ func TestInstallUninstallHook(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	cli.GetCwdHook = func() string { return tmpDir }
 	cli.GetHomeHook = func() string { return tmpDir }
@@ -106,7 +106,7 @@ func TestEnableIdeWildcardTrustCreatesNewSettingsFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	fakeSettings := filepath.Join(tmpDir, ".gemini", "antigravity-cli", "settings.json")
 	fakeConfig := filepath.Join(tmpDir, ".gemini", "config", "config.json")
@@ -211,7 +211,7 @@ func TestEnableIdeWildcardTrustPreservesExistingRulesAndCreatesBackup(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	fakeSettings := filepath.Join(tmpDir, ".gemini", "antigravity-cli", "settings.json")
 	fakeConfig := filepath.Join(tmpDir, ".gemini", "config", "config.json")
@@ -280,7 +280,7 @@ func TestEnableIdeWildcardTrustHandlesUtf8BOM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	fakeSettings := filepath.Join(tmpDir, ".gemini", "antigravity-cli", "settings.json")
 	fakeConfig := filepath.Join(tmpDir, ".gemini", "config", "config.json")
@@ -328,7 +328,7 @@ func TestDeclineIdeWorkspaceTrust(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	fakeDeclined := filepath.Join(tmpDir, ".gemini", "config", "declined_workspaces.json")
 	target := filepath.Join(tmpDir, "declined_ws")

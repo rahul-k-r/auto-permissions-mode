@@ -120,7 +120,7 @@ func (p *GeminiProvider) Evaluate(systemPrompt, prompt string) (map[string]inter
 	if err != nil {
 		return nil, "CLOUD", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusTooManyRequests {
 		body, _ := io.ReadAll(resp.Body)

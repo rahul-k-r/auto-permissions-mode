@@ -113,7 +113,7 @@ func (p *OpenAICompatibleProvider) ResolveModelID() string {
 		if err != nil {
 			continue
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode == http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
@@ -208,7 +208,7 @@ func (p *OpenAICompatibleProvider) Evaluate(systemPrompt, prompt string) (map[st
 		if err != nil {
 			continue
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode == http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)

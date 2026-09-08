@@ -80,7 +80,7 @@ func (p *AnthropicProvider) Evaluate(systemPrompt, prompt string) (map[string]in
 	if err != nil {
 		return nil, "CLOUD", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, "CLOUD", fmt.Errorf("anthropic returned status %d", resp.StatusCode)

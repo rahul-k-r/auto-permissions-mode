@@ -44,7 +44,7 @@ func TestBuildSystemPromptCustomPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	customPath := filepath.Join(tmpDir, "policy.md")
 	customRules := "## My Custom Security Policy\n- Only allow python commands."

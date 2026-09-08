@@ -47,7 +47,7 @@ func DetectHardware() HardwareInfo {
 	baseKey := `SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}`
 	k, err := registry.OpenKey(registry.LOCAL_MACHINE, baseKey, registry.READ)
 	if err == nil {
-		defer k.Close()
+		defer func() { _ = k.Close() }()
 		subkeys, err := k.ReadSubKeyNames(-1)
 		if err == nil {
 			var bestGPU string
@@ -61,12 +61,12 @@ func DetectHardware() HardwareInfo {
 
 				desc, _, err := sk.GetStringValue("DriverDesc")
 				if err != nil || desc == "" {
-					sk.Close()
+					_ = sk.Close()
 					continue
 				}
 				lowerDesc := strings.ToLower(desc)
 				if strings.Contains(lowerDesc, "virtual") || strings.Contains(lowerDesc, "remote") || strings.Contains(lowerDesc, "vga") {
-					sk.Close()
+					_ = sk.Close()
 					continue
 				}
 
@@ -90,7 +90,7 @@ func DetectHardware() HardwareInfo {
 						}
 					}
 				}
-				sk.Close()
+				_ = sk.Close()
 
 				if bytesVal > maxVRAM {
 					maxVRAM = bytesVal

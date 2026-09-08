@@ -75,7 +75,7 @@ func (p *OllamaProvider) ResolveModelID() string {
 	if err == nil {
 		req.Header.Set("Content-Type", "application/json")
 		if resp, err := client.Do(req); err == nil {
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode == http.StatusOK {
 				body, _ := io.ReadAll(resp.Body)
 				var data struct {
@@ -145,7 +145,7 @@ func (p *OllamaProvider) Evaluate(systemPrompt, prompt string) (map[string]inter
 	if err != nil {
 		return nil, "LOCAL", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, "LOCAL", fmt.Errorf("ollama returned status %d", resp.StatusCode)

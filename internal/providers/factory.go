@@ -31,15 +31,16 @@ func GetProvider(cfg config.Config) Provider {
 
 	var primary Provider
 
-	if provName == "gemini" {
+	switch provName {
+	case "gemini":
 		apiKey := ResolveAPIKey("GEMINI_API_KEY", "gemini_api_key", cfg.GeminiAPIKey, cfg.APIKey)
 		primary = NewGeminiProvider(apiKey, model, temp, timeout, maxTokens)
-	} else if provName == "anthropic" {
+	case "anthropic":
 		apiKey := ResolveAPIKey("ANTHROPIC_API_KEY", "anthropic_api_key", cfg.AnthropicAPIKey, cfg.APIKey)
 		primary = NewAnthropicProvider(apiKey, model, temp, timeout, maxTokens)
-	} else if provName == "ollama" {
+	case "ollama":
 		primary = NewOllamaProvider(endpoint, model, numCtx, temp, timeout, maxTokens)
-	} else {
+	default:
 		// llamacpp, openai, or generic openai-compatible
 		apiKey := ResolveAPIKey("OPENAI_API_KEY", "openai_api_key", cfg.OpenAIAPIKey, cfg.APIKey)
 		primary = NewOpenAICompatibleProvider(endpoint, model, apiKey, temp, timeout, maxTokens)
@@ -54,14 +55,16 @@ func GetProvider(cfg config.Config) Provider {
 		cloudModel := cfg.CloudModel
 
 		var secondary Provider
-		if cloudProv == "anthropic" {
+		switch cloudProv {
+		case "anthropic":
 			apiKey := ResolveAPIKey("ANTHROPIC_API_KEY", "anthropic_api_key", cfg.AnthropicAPIKey, cfg.APIKey)
 			secondary = NewAnthropicProvider(apiKey, cloudModel, temp, cloudTimeout, maxTokens)
-		} else if cloudProv == "openai" || cloudProv == "openrouter" || cloudProv == "groq" {
+		case "openai", "openrouter", "groq":
 			cloudEP := "https://api.openai.com/v1/chat/completions"
-			if cloudProv == "openrouter" {
+			switch cloudProv {
+			case "openrouter":
 				cloudEP = "https://openrouter.ai/api/v1/chat/completions"
-			} else if cloudProv == "groq" {
+			case "groq":
 				cloudEP = "https://api.groq.com/openai/v1/chat/completions"
 			}
 			apiKey := ResolveAPIKey("OPENAI_API_KEY", "openai_api_key", cfg.OpenAIAPIKey, cfg.APIKey)
@@ -81,7 +84,7 @@ func GetProvider(cfg config.Config) Provider {
 				defModel = cloudModel
 			}
 			secondary = NewOpenAICompatibleProvider(cloudEP, defModel, apiKey, temp, cloudTimeout, maxTokens)
-		} else {
+		default:
 			// default gemini
 			apiKey := ResolveAPIKey("GEMINI_API_KEY", "gemini_api_key", cfg.GeminiAPIKey, cfg.APIKey)
 			secondary = NewGeminiProvider(apiKey, cloudModel, temp, cloudTimeout, maxTokens)

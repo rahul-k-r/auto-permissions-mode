@@ -99,7 +99,7 @@ func CheckRecentUserApproval(toolName string, toolArgs map[string]interface{}, c
 	if err != nil {
 		return ""
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	if fileSize > readSize {
 		if _, err := f.Seek(fileSize-readSize, io.SeekStart); err != nil {

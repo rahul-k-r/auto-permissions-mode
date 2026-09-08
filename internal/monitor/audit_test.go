@@ -29,7 +29,7 @@ func TestTrimAuditLogRetentionAndMaxLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	auditPath := filepath.Join(tmpDir, "audit.jsonl")
 	now := float64(time.Now().Unix())
@@ -84,7 +84,7 @@ func TestTrimAuditLogProducesValidJSONLAfterTrim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	auditPath := filepath.Join(tmpDir, "audit.jsonl")
 	now := float64(time.Now().Unix())

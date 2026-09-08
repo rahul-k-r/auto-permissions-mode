@@ -291,7 +291,7 @@ func TestUserApprovalFromAskQuestionTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	transcriptFile := filepath.Join(tmpDir, "transcript.jsonl")
 
@@ -665,7 +665,7 @@ func TestUserApprovalNegationAndEmptyTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	transcriptFile := filepath.Join(tmpDir, "transcript.jsonl")
 
@@ -785,7 +785,7 @@ func TestHealCorruptedGitIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	gitDir := filepath.Join(tmpDir, ".git")
 	_ = os.MkdirAll(gitDir, 0755)
@@ -817,7 +817,7 @@ func TestDoNotHealValidGitIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	gitDir := filepath.Join(tmpDir, ".git")
 	_ = os.MkdirAll(gitDir, 0755)
@@ -889,7 +889,7 @@ func TestTranscriptApprovalRequiresExactPathMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	transcriptFile := filepath.Join(tmpDir, "transcript.jsonl")
 	steps := []map[string]interface{}{
