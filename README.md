@@ -191,9 +191,13 @@ On Windows, developers using Antigravity often encounter:
 fatal: .git/index: index file smaller than expected
 ```
 
-#### Why This Happens in Antigravity (and Not Claude Code)
+<details>
+<summary><b>Why this happens on Windows (vs. Claude Code)</b></summary>
+
 - **Claude Code** applies code modifications as **direct, clean filesystem writes**. VS Code's background git watcher detects the file update normally without lock collisions.
 - **Antigravity (`agy`)**, by default, injects an in-memory **Visual Diff Overlay with accept/reject CodeLenses** (`jetski.resolvedHunks`) over the editor buffer. When hunks are accepted or rejected, Antigravity flushes the diff while VS Code's background git watcher (`vscode.git`) is simultaneously scanning the repository. On Windows NTFS, this file-locking race condition can truncate `.git/index` to 0 bytes.
+
+</details>
 
 #### The Permanent Fix:
 To make Antigravity apply code changes directly without the pending hunk review state—matching **Claude Code's seamless behavior**—add this to your VS Code User settings (`settings.json`):
