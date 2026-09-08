@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -13,6 +14,23 @@ var (
 	GetCwdHook  func() string
 	GetHomeHook func() string
 )
+
+// appendIfMissing returns list with item appended, unless an exactly-equal entry is
+// already present.
+func appendIfMissing(list []string, item string) []string {
+	if slices.Contains(list, item) {
+		return list
+	}
+	return append(list, item)
+}
+
+// appendIfMissingFold is appendIfMissing with a case-insensitive comparison.
+func appendIfMissingFold(list []string, item string) []string {
+	if slices.ContainsFunc(list, func(existing string) bool { return strings.EqualFold(existing, item) }) {
+		return list
+	}
+	return append(list, item)
+}
 
 func currentCwd() string {
 	if GetCwdHook != nil {
@@ -60,10 +78,10 @@ func GetBundledRuleContent() string {
 }
 
 var (
-	GetAntigravityCliSettingsFileHook     func() string
-	GetAntigravityConfigFileHook          func() string
+	GetAntigravityCliSettingsFileHook    func() string
+	GetAntigravityConfigFileHook         func() string
 	GetAntigravityTrustedFoldersFileHook func() string
-	GetDeclinedWorkspacesFileHook         func() string
+	GetDeclinedWorkspacesFileHook        func() string
 )
 
 func GetAntigravityCliSettingsFile() string {
@@ -224,16 +242,7 @@ func EnableIdeWildcardTrust(workspacePath string) bool {
 		}
 	}
 	for _, rule := range []string{"command(*)", "mcp(*)", "write_file(*)"} {
-		found := false
-		for _, a := range allows {
-			if a == rule {
-				found = true
-				break
-			}
-		}
-		if !found {
-			allows = append(allows, rule)
-		}
+		allows = appendIfMissing(allows, rule)
 	}
 	gpg["allow"] = allows
 	userSettings["internetPolicy"] = "AGENT_SETTING_POLICY_ALLOW"
@@ -281,16 +290,7 @@ func EnableIdeWildcardTrust(workspacePath string) bool {
 		}
 	}
 	for _, w := range []string{"mcp(*)", "read_url(*)", "command(*)", "write_file(*)"} {
-		found := false
-		for _, ex := range setAllows {
-			if ex == w {
-				found = true
-				break
-			}
-		}
-		if !found {
-			setAllows = append(setAllows, w)
-		}
+		setAllows = appendIfMissing(setAllows, w)
 	}
 	perms["allow"] = setAllows
 
@@ -302,16 +302,7 @@ func EnableIdeWildcardTrust(workspacePath string) bool {
 			}
 		}
 	}
-	hasTW := false
-	for _, tw := range twList {
-		if strings.EqualFold(tw, targetWS) {
-			hasTW = true
-			break
-		}
-	}
-	if !hasTW {
-		twList = append(twList, targetWS)
-	}
+	twList = appendIfMissingFold(twList, targetWS)
 	settingsData["trustedWorkspaces"] = twList
 
 	bSettings, _ := json.MarshalIndent(settingsData, "", "  ")

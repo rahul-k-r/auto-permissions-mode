@@ -107,6 +107,8 @@ func TestIsCatastrophicCommandCatchesBareWildcardDelete(t *testing.T) {
 		"rm -rf *",
 		"rm -rf .",
 		"rm -rf",
+		"rm -rf ./",
+		"rm -rf ./*",
 	}
 	for _, cmd := range catastrophic {
 		if !IsCatastrophicCommand(cmd) {
@@ -123,6 +125,21 @@ func TestIsCatastrophicCommandCatchesBareWildcardDelete(t *testing.T) {
 	for _, cmd := range stillSafe {
 		if IsCatastrophicCommand(cmd) {
 			t.Errorf("expected %q NOT to be flagged as catastrophic", cmd)
+		}
+	}
+}
+
+// TestIsCatastrophicCommandDelIgnoresSwitchOrder guards against a regression where the del
+// pattern only matched "/s" appearing before "/q" in the command text, even though cmd.exe
+// treats switch order as irrelevant.
+func TestIsCatastrophicCommandDelIgnoresSwitchOrder(t *testing.T) {
+	cases := []string{
+		"del /s /q C:\\Windows",
+		"del /q /s C:\\Windows",
+	}
+	for _, cmd := range cases {
+		if !IsCatastrophicCommand(cmd) {
+			t.Errorf("expected %q to be flagged as catastrophic regardless of switch order", cmd)
 		}
 	}
 }

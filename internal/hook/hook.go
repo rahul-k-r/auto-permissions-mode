@@ -36,16 +36,28 @@ var AuditRecorder = func(toolName string, toolArgs map[string]interface{}, decis
 }
 
 func RunHook(reader io.Reader, writer io.Writer) (err error) {
+	var (
+		cfg       config.Config
+		toolName  = "unknown"
+		toolArgs  map[string]interface{}
+		context   map[string]interface{}
+		result    evaluator.DecisionResult
+		latencyMS float64
+	)
+
 	// Last-resort safety net: any panic below (a provider HTTP bug, an unexpected nil,
 	// etc.) must still produce a valid decision JSON line on stdout — Claude Code's hook
 	// contract expects one, and a bare process crash with no output is treated as a hard
-	// failure rather than a graceful ask.
+	// failure rather than a graceful ask. toolName/toolArgs/context/cfg are declared above
+	// so this closure sees whatever had been populated by the time the panic happened.
 	fallbackAction := "force_ask"
 	defer func() {
 		if r := recover(); r != nil {
+			reason := fmt.Sprintf("Hook evaluation panic (%v). Deferring to '%s'.", r, fallbackAction)
+			AuditRecorder(toolName, toolArgs, strings.ToUpper(fallbackAction), reason, 0, "ERROR", context, cfg)
 			out := HookOutput{
 				Decision: fallbackAction,
-				Reason:   fmt.Sprintf("Hook evaluation panic (%v). Deferring to '%s'.", r, fallbackAction),
+				Reason:   reason,
 			}
 			b, _ := json.Marshal(out)
 			fmt.Fprintln(writer, string(b))
@@ -64,20 +76,13 @@ func RunHook(reader io.Reader, writer io.Writer) (err error) {
 		return nil
 	}
 
-	cfg := ConfigLoader()
+	cfg = ConfigLoader()
 	if cfg.FallbackAction != "" {
 		fallbackAction = cfg.FallbackAction
 		if strings.EqualFold(fallbackAction, "ask") {
 			fallbackAction = "force_ask"
 		}
 	}
-	var (
-		toolName  = "unknown"
-		toolArgs  map[string]interface{}
-		context   map[string]interface{}
-		result    evaluator.DecisionResult
-		latencyMS float64
-	)
 
 	var data map[string]interface{}
 	if unmarshalErr := json.Unmarshal(rawInput, &data); unmarshalErr != nil {

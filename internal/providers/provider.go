@@ -3,6 +3,7 @@ package providers
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -14,13 +15,15 @@ type Provider interface {
 	GetEndpoint() string
 }
 
-// ResolveAPIKey mirrors Python's precedence exactly: a provider-specific config key first,
-// then the generic api_key, and only then the environment variable. specificKey and
-// genericKey are read from the already-loaded Config (whichever file — project-local or
-// global — it came from), not re-read from a hardcoded global path, so a project-local
-// auto-permissions.json setting api_key is honored the same way Python's config.get(...)
-// dict lookup is, regardless of which config file it happened to be set in.
-func ResolveAPIKey(envVar, specificKey, genericKey string) string {
+// ResolveAPIKey mirrors Python's precedence: a provider-specific config key first, then the
+// generic api_key, and only then the environment variable. specificKey/genericKey are the
+// already-loaded Config's values (whichever file — project-local or global — it came from),
+// so a project-local auto-permissions.json setting api_key is honored the same way Python's
+// config.get(...) dict lookup is. configKey names the field to fall back to reading from
+// ~/.gemini/config/auto-permissions.json for callers with no loaded Config to pass in
+// (e.g. a provider constructed directly rather than via GetProvider) — without this, direct
+// construction would only ever see the environment variable.
+func ResolveAPIKey(envVar, configKey, specificKey, genericKey string) string {
 	if specificKey != "" {
 		return strings.TrimSpace(specificKey)
 	}
@@ -29,6 +32,25 @@ func ResolveAPIKey(envVar, specificKey, genericKey string) string {
 	}
 	if val := os.Getenv(envVar); val != "" {
 		return strings.TrimSpace(val)
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	globalConfigPath := filepath.Join(home, ".gemini", "config", "auto-permissions.json")
+	if data, err := os.ReadFile(globalConfigPath); err == nil {
+		var cfg map[string]interface{}
+		if err := json.Unmarshal(data, &cfg); err == nil {
+			if configKey != "" {
+				if k, ok := cfg[configKey].(string); ok && k != "" {
+					return strings.TrimSpace(k)
+				}
+			}
+			if k, ok := cfg["api_key"].(string); ok && k != "" {
+				return strings.TrimSpace(k)
+			}
+		}
 	}
 	return ""
 }

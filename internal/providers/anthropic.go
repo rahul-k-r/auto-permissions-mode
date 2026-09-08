@@ -21,7 +21,7 @@ type AnthropicProvider struct {
 
 func NewAnthropicProvider(apiKey, model string, temp float64, timeout time.Duration, maxTokens int) *AnthropicProvider {
 	if apiKey == "" {
-		apiKey = ResolveAPIKey("ANTHROPIC_API_KEY", "", "")
+		apiKey = ResolveAPIKey("ANTHROPIC_API_KEY", "anthropic_api_key", "", "")
 	}
 	if model == "" || model == "auto" || model == "default" {
 		model = "claude-3-5-haiku-latest"

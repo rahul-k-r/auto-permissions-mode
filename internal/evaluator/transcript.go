@@ -31,8 +31,12 @@ func ParseOptionString(raw string) (string, string) {
 	return text, ""
 }
 
-// resolvePathBestEffort mirrors Python's Path(p).resolve(): absolute-ify, falling back to
-// the original string if resolution fails.
+// resolvePathBestEffort approximates Python's Path(p).resolve(): it makes p absolute
+// relative to the working directory, falling back to the original string if that fails.
+// Unlike Python's resolve(), it does not follow symlinks — a symlinked workspace path
+// could fail to exact-match here where Python would consider it the same canonical path.
+// That fails closed (a legitimate approval stops auto-matching, forcing an extra ask)
+// rather than open, so it's a parity gap worth knowing about, not a security hole.
 func resolvePathBestEffort(p string) string {
 	if abs, err := filepath.Abs(p); err == nil {
 		return abs

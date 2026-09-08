@@ -72,6 +72,14 @@ type evalResult struct {
 func callWithTimeout(p Provider, systemPrompt, prompt string, timeout time.Duration) (map[string]interface{}, string, error) {
 	ch := make(chan evalResult, 1)
 	go func() {
+		// A panic here runs on a goroutine other than the one that could recover it —
+		// left unrecovered, it would crash the whole process regardless of any recover()
+		// higher up the caller's stack. Convert it into an error instead.
+		defer func() {
+			if r := recover(); r != nil {
+				ch <- evalResult{nil, "", fmt.Errorf("provider panic: %v", r)}
+			}
+		}()
 		res, src, err := p.Evaluate(systemPrompt, prompt)
 		ch <- evalResult{res, src, err}
 	}()

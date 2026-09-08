@@ -155,7 +155,9 @@ func TestPanicDuringEvaluationStillEmitsDecision(t *testing.T) {
 	hook.ProviderGetter = func(c config.Config) providers.Provider {
 		panic("simulated provider construction failure")
 	}
+	auditCalled := false
 	hook.AuditRecorder = func(toolName string, toolArgs map[string]interface{}, decision, reason string, latencyMS float64, source string, context map[string]interface{}, cfg config.Config) {
+		auditCalled = true
 	}
 
 	payload, _ := json.Marshal(map[string]interface{}{
@@ -168,6 +170,11 @@ func TestPanicDuringEvaluationStillEmitsDecision(t *testing.T) {
 	var writer bytes.Buffer
 	if err := hook.RunHook(reader, &writer); err != nil {
 		t.Fatalf("expected RunHook to recover and return nil, got error: %v", err)
+	}
+	// A panic is exactly the kind of anomaly an auditor most needs visibility into — it
+	// must leave a trace, the same as the malformed-JSON path does.
+	if !auditCalled {
+		t.Fatalf("expected AuditRecorder to be called on the panic-recovery path")
 	}
 
 	var result map[string]interface{}

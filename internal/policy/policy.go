@@ -22,10 +22,12 @@ var catastrophicPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)\brm\s+-[a-z]*r[a-z]*f[a-z]*\s+([/~]|(\$HOME)|\.\./|\.\.\\)`),
 	// A named relative subdirectory (rm -rf ./build, rm -rf dist/) is treated as an
 	// accepted YOLO-safe build-cleanup operation, but a bare wildcard, bare "." (the cwd
-	// itself), or no target at all is just as destructive as an absolute path and was
-	// previously missed entirely since it has no leading "/", "~", or "../".
-	regexp.MustCompile(`(?i)\brm\s+(-[a-z]*r[a-z]*f[a-z]*\b|-[a-z]*f[a-z]*r[a-z]*\b|--recursive\b.*--force\b|--force\b.*--recursive\b)\s*(\*\s*$|\.\s*$|$)`),
-	regexp.MustCompile(`(?i)\bdel\b.*/s\b.*/q\b`),
+	// itself) — optionally spelled "./" or "./*" — or no target at all is just as
+	// destructive as an absolute path and was previously missed entirely since it has no
+	// leading "/", "~", or "../".
+	regexp.MustCompile(`(?i)\brm\s+(-[a-z]*r[a-z]*f[a-z]*\b|-[a-z]*f[a-z]*r[a-z]*\b|--recursive\b.*--force\b|--force\b.*--recursive\b)\s*(\./)?[.*]?\s*$`),
+	// Switch order is irrelevant to cmd.exe, so match /s and /q in either order.
+	regexp.MustCompile(`(?i)\bdel\b.*(/s\b.*/q\b|/q\b.*/s\b)`),
 	regexp.MustCompile(`(?i)\bdrop\s+database\s+(prod|production|main|master)\b`),
 	regexp.MustCompile(`(?i)\bformat\s+[a-z]:`),
 	regexp.MustCompile(`(?i)\bgit\s+push\b.*(--force|-f)\b.*\b(main|master)\b`),

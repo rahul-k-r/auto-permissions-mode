@@ -136,6 +136,33 @@ func TestTieredProviderCircuitBreaker(t *testing.T) {
 	tiered.MarkLocalHealthy()
 }
 
+type panickingProvider struct{}
+
+func (p *panickingProvider) Evaluate(systemPrompt, prompt string) (map[string]interface{}, string, error) {
+	panic("simulated provider bug")
+}
+
+func (p *panickingProvider) GetEndpoint() string { return "http://panics" }
+
+// TestTieredProviderRecoversFromPrimaryPanic guards against a regression where a panic
+// inside the primary provider's call (running on its own goroutine inside callWithTimeout)
+// was unrecoverable from RunHook's top-level recover() — a panic on a goroutine other than
+// the one holding the recover crashes the whole process regardless of any outer recover.
+func TestTieredProviderRecoversFromPrimaryPanic(t *testing.T) {
+	primary := &panickingProvider{}
+	secondary := &mockSimpleProvider{response: map[string]interface{}{"decision": "allow", "reason": "Cloud rescued a panicking primary."}}
+	tiered := providers.NewTieredProvider(primary, secondary, 11*time.Second)
+	tiered.MarkLocalHealthy()
+
+	res, src, err := tiered.Evaluate("system", "prompt")
+	if err != nil {
+		t.Fatalf("expected the panic to be converted into a graceful cloud failover, got error: %v", err)
+	}
+	if res["decision"] != "allow" || src != "FAILOVER" {
+		t.Fatalf("expected cloud failover to rescue a panicking primary, got %v/%s", res["decision"], src)
+	}
+}
+
 func TestOllamaAutoModelResolution(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -346,13 +373,13 @@ func TestGroqCloudDefaultsToAutoModel(t *testing.T) {
 func TestResolveAPIKeyPrecedence(t *testing.T) {
 	t.Setenv("TEST_PROVIDER_API_KEY", "from-env")
 
-	if got := providers.ResolveAPIKey("TEST_PROVIDER_API_KEY", "from-specific", "from-generic"); got != "from-specific" {
+	if got := providers.ResolveAPIKey("TEST_PROVIDER_API_KEY", "", "from-specific", "from-generic"); got != "from-specific" {
 		t.Fatalf("expected specific config key to win, got %q", got)
 	}
-	if got := providers.ResolveAPIKey("TEST_PROVIDER_API_KEY", "", "from-generic"); got != "from-generic" {
+	if got := providers.ResolveAPIKey("TEST_PROVIDER_API_KEY", "", "", "from-generic"); got != "from-generic" {
 		t.Fatalf("expected generic api_key to win over env when specific is empty, got %q", got)
 	}
-	if got := providers.ResolveAPIKey("TEST_PROVIDER_API_KEY", "", ""); got != "from-env" {
+	if got := providers.ResolveAPIKey("TEST_PROVIDER_API_KEY", "", "", ""); got != "from-env" {
 		t.Fatalf("expected env var fallback when no config key is set, got %q", got)
 	}
 }

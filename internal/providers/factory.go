@@ -32,16 +32,16 @@ func GetProvider(cfg config.Config) Provider {
 	var primary Provider
 
 	if provName == "gemini" {
-		apiKey := ResolveAPIKey("GEMINI_API_KEY", cfg.GeminiAPIKey, cfg.APIKey)
+		apiKey := ResolveAPIKey("GEMINI_API_KEY", "gemini_api_key", cfg.GeminiAPIKey, cfg.APIKey)
 		primary = NewGeminiProvider(apiKey, model, temp, timeout, maxTokens)
 	} else if provName == "anthropic" {
-		apiKey := ResolveAPIKey("ANTHROPIC_API_KEY", cfg.AnthropicAPIKey, cfg.APIKey)
+		apiKey := ResolveAPIKey("ANTHROPIC_API_KEY", "anthropic_api_key", cfg.AnthropicAPIKey, cfg.APIKey)
 		primary = NewAnthropicProvider(apiKey, model, temp, timeout, maxTokens)
 	} else if provName == "ollama" {
 		primary = NewOllamaProvider(endpoint, model, numCtx, temp, timeout, maxTokens)
 	} else {
 		// llamacpp, openai, or generic openai-compatible
-		apiKey := ResolveAPIKey("OPENAI_API_KEY", cfg.OpenAIAPIKey, cfg.APIKey)
+		apiKey := ResolveAPIKey("OPENAI_API_KEY", "openai_api_key", cfg.OpenAIAPIKey, cfg.APIKey)
 		primary = NewOpenAICompatibleProvider(endpoint, model, apiKey, temp, timeout, maxTokens)
 	}
 
@@ -55,7 +55,7 @@ func GetProvider(cfg config.Config) Provider {
 
 		var secondary Provider
 		if cloudProv == "anthropic" {
-			apiKey := ResolveAPIKey("ANTHROPIC_API_KEY", cfg.AnthropicAPIKey, cfg.APIKey)
+			apiKey := ResolveAPIKey("ANTHROPIC_API_KEY", "anthropic_api_key", cfg.AnthropicAPIKey, cfg.APIKey)
 			secondary = NewAnthropicProvider(apiKey, cloudModel, temp, cloudTimeout, maxTokens)
 		} else if cloudProv == "openai" || cloudProv == "openrouter" || cloudProv == "groq" {
 			cloudEP := "https://api.openai.com/v1/chat/completions"
@@ -64,9 +64,9 @@ func GetProvider(cfg config.Config) Provider {
 			} else if cloudProv == "groq" {
 				cloudEP = "https://api.groq.com/openai/v1/chat/completions"
 			}
-			apiKey := ResolveAPIKey("OPENAI_API_KEY", cfg.OpenAIAPIKey, cfg.APIKey)
+			apiKey := ResolveAPIKey("OPENAI_API_KEY", "openai_api_key", cfg.OpenAIAPIKey, cfg.APIKey)
 			if cloudProv == "openrouter" {
-				if k := ResolveAPIKey("OPENROUTER_API_KEY", cfg.OpenRouterAPIKey, cfg.APIKey); k != "" {
+				if k := ResolveAPIKey("OPENROUTER_API_KEY", "openrouter_api_key", cfg.OpenRouterAPIKey, cfg.APIKey); k != "" {
 					apiKey = k
 				}
 			}
@@ -83,7 +83,7 @@ func GetProvider(cfg config.Config) Provider {
 			secondary = NewOpenAICompatibleProvider(cloudEP, defModel, apiKey, temp, cloudTimeout, maxTokens)
 		} else {
 			// default gemini
-			apiKey := ResolveAPIKey("GEMINI_API_KEY", cfg.GeminiAPIKey, cfg.APIKey)
+			apiKey := ResolveAPIKey("GEMINI_API_KEY", "gemini_api_key", cfg.GeminiAPIKey, cfg.APIKey)
 			secondary = NewGeminiProvider(apiKey, cloudModel, temp, cloudTimeout, maxTokens)
 		}
 
