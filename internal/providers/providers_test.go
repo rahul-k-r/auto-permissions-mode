@@ -290,3 +290,69 @@ func TestGetProviderTieredWiring(t *testing.T) {
 		t.Fatalf("expected openai endpoint, got %s", secOpenAI.Endpoint)
 	}
 }
+
+// TestGeminiPrimaryStillGetsCloudFailover guards against a regression where selecting
+// "gemini" (or "anthropic") as the primary provider returned early, bypassing the
+// FallbackToCloud wiring entirely — so a rate-limited or timed-out Gemini primary had no
+// secondary to fail over to, silently making fallback_to_cloud/cloud_provider inert.
+func TestGeminiPrimaryStillGetsCloudFailover(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	cfg.Provider = "gemini"
+	cfg.FallbackToCloud = true
+	cfg.CloudProvider = "anthropic"
+
+	prov := providers.GetProvider(cfg)
+	tiered, ok := prov.(*providers.TieredProvider)
+	if !ok {
+		t.Fatalf("expected a gemini primary to still be wrapped in TieredProvider, got %T", prov)
+	}
+	if _, ok := tiered.Primary.(*providers.GeminiProvider); !ok {
+		t.Fatalf("expected GeminiProvider primary, got %T", tiered.Primary)
+	}
+	if _, ok := tiered.Secondary.(*providers.AnthropicProvider); !ok {
+		t.Fatalf("expected AnthropicProvider secondary, got %T", tiered.Secondary)
+	}
+}
+
+// TestGroqCloudDefaultsToAutoModel guards against a regression where Groq/OpenRouter cloud
+// failover always requested "gpt-4o-mini" — a model those endpoints don't serve — instead
+// of "auto", which lets the provider resolve an available model from the endpoint itself.
+func TestGroqCloudDefaultsToAutoModel(t *testing.T) {
+	cfg := config.NewDefaultConfig()
+	cfg.Provider = "llamacpp"
+	cfg.FallbackToCloud = true
+	cfg.CloudProvider = "groq"
+	cfg.CloudModel = ""
+
+	prov := providers.GetProvider(cfg)
+	tiered, ok := prov.(*providers.TieredProvider)
+	if !ok {
+		t.Fatalf("expected TieredProvider, got %T", prov)
+	}
+	secGroq, ok := tiered.Secondary.(*providers.OpenAICompatibleProvider)
+	if !ok {
+		t.Fatalf("expected OpenAICompatibleProvider secondary, got %T", tiered.Secondary)
+	}
+	if secGroq.Model != "auto" {
+		t.Fatalf("expected Groq cloud model to default to 'auto', got %q", secGroq.Model)
+	}
+}
+
+// TestResolveAPIKeyPrecedence guards against a regression where a project-local
+// auto-permissions.json's api_key/provider-specific key was silently ignored because
+// ResolveAPIKey only ever consulted the environment variable and a hardcoded global config
+// path, never the already-loaded Config. Precedence must match Python: specific key >
+// generic api_key > environment variable.
+func TestResolveAPIKeyPrecedence(t *testing.T) {
+	t.Setenv("TEST_PROVIDER_API_KEY", "from-env")
+
+	if got := providers.ResolveAPIKey("TEST_PROVIDER_API_KEY", "from-specific", "from-generic"); got != "from-specific" {
+		t.Fatalf("expected specific config key to win, got %q", got)
+	}
+	if got := providers.ResolveAPIKey("TEST_PROVIDER_API_KEY", "", "from-generic"); got != "from-generic" {
+		t.Fatalf("expected generic api_key to win over env when specific is empty, got %q", got)
+	}
+	if got := providers.ResolveAPIKey("TEST_PROVIDER_API_KEY", "", ""); got != "from-env" {
+		t.Fatalf("expected env var fallback when no config key is set, got %q", got)
+	}
+}

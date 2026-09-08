@@ -4,6 +4,65 @@ import (
 	"strings"
 )
 
+// shellSplit tokenizes a command line the way Python's shlex.split does: quoted regions
+// (single or double) become one token with the quote characters stripped, so a commit
+// message like `git commit -m "reset the counter"` produces the token `reset the counter`
+// rather than shattering into separate words. A naive strings.Fields split does the
+// latter, which lets an ordinary English word inside a quoted argument (e.g. "reset",
+// "clean", "drop" — all of which are also risky git flags) spuriously match the risky-flag
+// check below, and can also let a quoted "." or "--" checkout argument dodge the
+// destructive-checkout check by leaving quote characters glued to the token.
+func shellSplit(s string) []string {
+	var tokens []string
+	var cur strings.Builder
+	hasToken := false
+	inSingle, inDouble := false, false
+
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case inSingle:
+			if c == '\'' {
+				inSingle = false
+			} else {
+				cur.WriteByte(c)
+			}
+		case inDouble:
+			if c == '"' {
+				inDouble = false
+			} else if c == '\\' && i+1 < len(s) && (s[i+1] == '"' || s[i+1] == '\\') {
+				i++
+				cur.WriteByte(s[i])
+			} else {
+				cur.WriteByte(c)
+			}
+		case c == '\'':
+			inSingle = true
+			hasToken = true
+		case c == '"':
+			inDouble = true
+			hasToken = true
+		case c == ' ' || c == '\t':
+			if hasToken {
+				tokens = append(tokens, cur.String())
+				cur.Reset()
+				hasToken = false
+			}
+		case c == '\\' && i+1 < len(s):
+			i++
+			cur.WriteByte(s[i])
+			hasToken = true
+		default:
+			cur.WriteByte(c)
+			hasToken = true
+		}
+	}
+	if hasToken {
+		tokens = append(tokens, cur.String())
+	}
+	return tokens
+}
+
 var SafeLocalGitPrefixes = []string{
 	"git add", "git commit", "git status", "git diff", "git log",
 	"git branch", "git checkout", "git switch", "git stash", "git show", "git tag",
@@ -28,7 +87,7 @@ func IsSafeLocalGitCommand(commandLine string) bool {
 		return false
 	}
 
-	tokens := strings.Fields(cmd)
+	tokens := shellSplit(cmd)
 	if len(tokens) == 0 || tokens[0] != "git" {
 		return false
 	}

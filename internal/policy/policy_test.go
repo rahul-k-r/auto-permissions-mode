@@ -97,3 +97,32 @@ func TestIsCatastrophicCommand(t *testing.T) {
 		}
 	}
 }
+
+// TestIsCatastrophicCommandCatchesBareWildcardDelete guards against a regression where the
+// rm -rf pattern only matched absolute/home/parent-relative targets, so a bare wildcard or
+// current-directory delete — just as destructive, and lacking any leading "/", "~", or
+// "../" — slipped through YOLO mode's sanity gate entirely.
+func TestIsCatastrophicCommandCatchesBareWildcardDelete(t *testing.T) {
+	catastrophic := []string{
+		"rm -rf *",
+		"rm -rf .",
+		"rm -rf",
+	}
+	for _, cmd := range catastrophic {
+		if !IsCatastrophicCommand(cmd) {
+			t.Errorf("expected %q to be flagged as catastrophic", cmd)
+		}
+	}
+
+	// Named relative subdirectories remain an accepted YOLO-safe build-cleanup operation.
+	stillSafe := []string{
+		"rm -rf ./build",
+		"rm -rf dist/",
+		"rm -rf node_modules",
+	}
+	for _, cmd := range stillSafe {
+		if IsCatastrophicCommand(cmd) {
+			t.Errorf("expected %q NOT to be flagged as catastrophic", cmd)
+		}
+	}
+}

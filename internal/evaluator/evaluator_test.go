@@ -6,11 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/rahul-k-r/auto-permissions-mode/internal/config"
 	"github.com/rahul-k-r/auto-permissions-mode/internal/evaluator"
-	// "github.com/rahul-k-r/auto-permissions-mode/internal/policy"
+	"github.com/rahul-k-r/auto-permissions-mode/internal/policy"
 )
 
 type mockProvider struct {
@@ -275,127 +274,12 @@ func TestTierFromGB(t *testing.T) {
 	}
 }
 
-func ExtractProjectName(ctx map[string]interface{}, toolArgs map[string]interface{}) string {
-	if ctx != nil {
-		if ws, ok := ctx["workspace_paths"].([]string); ok && len(ws) > 0 && ws[0] != "" {
-			return filepath.Base(filepath.Clean(ws[0]))
-		}
-	}
-	if cwd, ok := toolArgs["Cwd"].(string); ok && cwd != "" {
-		return filepath.Base(filepath.Clean(cwd))
-	}
-	return "default"
-}
-
-func SummarizeArgs(toolName string, toolArgs map[string]interface{}) string {
-	if toolName == "run_command" {
-		if cmd, ok := toolArgs["CommandLine"].(string); ok {
-			return cmd
-		}
-	}
-	return ""
-}
-
-func TestExtractProjectNameAndSummarize(t *testing.T) {
-	ctx := map[string]interface{}{"workspace_paths": []string{"/home/user/projects/my-app"}}
-	if ExtractProjectName(ctx, nil) != "my-app" {
-		t.Fatalf("expected my-app")
-	}
-	if ExtractProjectName(nil, map[string]interface{}{"Cwd": `C:\projects\backend`}) != "backend" {
-		t.Fatalf("expected backend")
-	}
-	if SummarizeArgs("run_command", map[string]interface{}{"CommandLine": "git status"}) != "git status" {
-		t.Fatalf("expected git status")
-	}
-}
-
-func TrimAuditLog(retentionDays, maxLines int, auditPath string) int {
-	data, err := os.ReadFile(auditPath)
-	if err != nil {
-		return 0
-	}
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "") {
-		return 0
-	}
-	totalBefore := len(lines)
-	cutoff := float64(time.Now().Unix()) - float64(retentionDays*86400)
-
-	var surviving []string
-	for _, l := range lines {
-		l = strings.TrimSpace(l)
-		if l == "" {
-			continue
-		}
-		var item map[string]interface{}
-		if err := json.Unmarshal([]byte(l), &item); err == nil {
-			if ts, ok := item["timestamp"].(float64); ok && ts > 0 && ts < cutoff {
-				continue
-			}
-		}
-		surviving = append(surviving, l)
-	}
-
-	if maxLines > 0 && len(surviving) > maxLines {
-		surviving = surviving[len(surviving)-maxLines:]
-	}
-
-	pruned := totalBefore - len(surviving)
-	if pruned > 0 {
-		out := strings.Join(surviving, "\n") + "\n"
-		_ = os.WriteFile(auditPath, []byte(out), 0644)
-	}
-	return pruned
-}
-
-func TestTrimAuditLogRetentionAndMaxLines(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "audit-trim-test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(tmpDir)
-
-	auditPath := filepath.Join(tmpDir, "audit.jsonl")
-	now := float64(time.Now().Unix())
-	oldTs := now - float64(20*86400)
-	recentTs := now - 100
-
-	entries := []map[string]interface{}{
-		{"timestamp": oldTs, "tool": "old_tool_1"},
-		{"timestamp": oldTs, "tool": "old_tool_2"},
-		{"timestamp": recentTs, "tool": "recent_1"},
-		{"timestamp": recentTs, "tool": "recent_2"},
-		{"timestamp": recentTs, "tool": "recent_3"},
-	}
-
-	var rawLines []string
-	for _, e := range entries {
-		b, _ := json.Marshal(e)
-		rawLines = append(rawLines, string(b))
-	}
-	_ = os.WriteFile(auditPath, []byte(strings.Join(rawLines, "\n")+"\n"), 0644)
-
-	pruned := TrimAuditLog(14, 10, auditPath)
-	if pruned != 2 {
-		t.Fatalf("expected 2 pruned, got %d", pruned)
-	}
-
-	data, _ := os.ReadFile(auditPath)
-	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 remaining, got %d", len(lines))
-	}
-
-	prunedCap := TrimAuditLog(14, 2, auditPath)
-	if prunedCap != 1 {
-		t.Fatalf("expected 1 pruned by max_lines, got %d", prunedCap)
-	}
-	data2, _ := os.ReadFile(auditPath)
-	lines2 := strings.Split(strings.TrimSpace(string(data2)), "\n")
-	if len(lines2) != 2 {
-		t.Fatalf("expected 2 remaining, got %d", len(lines2))
-	}
-}
+// NOTE: audit-log helpers (ExtractProjectName, SummarizeArgs, TrimAuditLog) used to have a
+// second, independent copy duplicated right here in the evaluator test file, and these
+// "tests" exercised that copy — never the real internal/monitor/audit.go implementation
+// that actually ships. That meant TestTrimAuditLogRetentionAndMaxLines could pass even if
+// monitor.TrimAuditLog were completely broken. Real coverage now lives in
+// internal/monitor/audit_test.go, against the actual package.
 
 func TestUserApprovalFromAskQuestionTranscript(t *testing.T) {
 	p := &mockProvider{response: map[string]interface{}{"decision": "deny", "reason": "Destructive action blocked"}}
@@ -689,23 +573,13 @@ func TestComputePermissionOverridesHelpers(t *testing.T) {
 		t.Fatalf("unexpected command overrides: %v", cmdOverrides)
 	}
 
-	// 4. File edit
+	// 4. File edit — a single, precisely scoped write_file override (matches Python's
+	// compute_permission_overrides; granting write_to_file/replace_file_content tokens too
+	// would widen the resulting Antigravity permission scope beyond what was evaluated).
 	fileOverrides := evaluator.ComputePermissionOverrides("write_to_file", map[string]interface{}{
 		"TargetFile": "src/app.py",
 	})
-	hasWriteFile, hasWriteToFile, hasReplaceFile := false, false, false
-	for _, o := range fileOverrides {
-		if o == "write_file(src/app.py)" {
-			hasWriteFile = true
-		}
-		if o == "write_to_file(src/app.py)" {
-			hasWriteToFile = true
-		}
-		if o == "replace_file_content(src/app.py)" {
-			hasReplaceFile = true
-		}
-	}
-	if !hasWriteFile || !hasWriteToFile || !hasReplaceFile {
+	if len(fileOverrides) != 1 || fileOverrides[0] != "write_file(src/app.py)" {
 		t.Fatalf("unexpected file overrides: %v", fileOverrides)
 	}
 
@@ -967,5 +841,124 @@ func TestDoNotHealValidGitIndex(t *testing.T) {
 	}
 	if called {
 		t.Fatalf("repair runner should not have been called")
+	}
+}
+
+// TestYoloModeDoesNotBypassProtectedPaths guards against a regression where YOLO mode's
+// auto-allow fast-path returned before the protected-paths guard ever ran, letting a
+// write to a credential file (.env, id_rsa, ...) through with zero review.
+func TestYoloModeDoesNotBypassProtectedPaths(t *testing.T) {
+	p := &mockProvider{response: map[string]interface{}{"decision": "deny", "reason": "Writes to .env require review."}}
+	cfg := config.NewDefaultConfig()
+	cfg.PolicyMode = policy.ModeYolo
+	e := evaluator.NewSecurityEvaluator(p, cfg)
+
+	res := e.EvaluateToolCall("write_to_file", map[string]interface{}{"TargetFile": ".env"}, nil)
+	if res.Source == "FAST-PATH" {
+		t.Fatalf("expected protected-path write to fall through to the provider in YOLO mode, got FAST-PATH auto-allow: %+v", res)
+	}
+	if res.Decision != "deny" {
+		t.Fatalf("expected the provider's deny decision to be honored, got %s", res.Decision)
+	}
+}
+
+// TestYoloModeStillFastPathsSafeWrites confirms the protected-path guard didn't turn into
+// an accidental blanket LLM-routing for every YOLO write.
+func TestYoloModeStillFastPathsSafeWrites(t *testing.T) {
+	p := &mockProvider{response: map[string]interface{}{"decision": "deny", "reason": "should not be called"}}
+	cfg := config.NewDefaultConfig()
+	cfg.PolicyMode = policy.ModeYolo
+	e := evaluator.NewSecurityEvaluator(p, cfg)
+
+	res := e.EvaluateToolCall("write_to_file", map[string]interface{}{"TargetFile": "src/app.py"}, nil)
+	if res.Decision != "allow" || res.Source != "FAST-PATH" {
+		t.Fatalf("expected YOLO fast-path allow for a non-protected file, got %+v", res)
+	}
+}
+
+// TestTranscriptApprovalRequiresExactPathMatch guards against a regression where file
+// authorization was granted via substring matching against the raw approved-command text,
+// letting an unrelated prior approval (mentioning any filename ending in ".env") silently
+// authorize a write to an unrelated ".env" file.
+func TestTranscriptApprovalRequiresExactPathMatch(t *testing.T) {
+	p := &mockProvider{response: map[string]interface{}{"decision": "deny", "reason": "Writes to .env require review."}}
+	cfg := config.NewDefaultConfig()
+	e := evaluator.NewSecurityEvaluator(p, cfg)
+
+	tmpDir, err := os.MkdirTemp("", "transcript-substring-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	transcriptFile := filepath.Join(tmpDir, "transcript.jsonl")
+	steps := []map[string]interface{}{
+		{
+			"step_index": 10,
+			"type":       "PLANNER_RESPONSE",
+			"tool_calls": []map[string]interface{}{
+				{
+					"name": "ask_question",
+					"args": map[string]interface{}{
+						"questions": []map[string]interface{}{
+							{"options": []string{"Diff the frontend config (git diff frontend.env)"}},
+						},
+					},
+				},
+			},
+		},
+		{
+			"step_index": 11,
+			"type":       "GENERIC",
+			"content":    "A1: Diff the frontend config (git diff frontend.env)",
+		},
+	}
+	var lines []string
+	for _, s := range steps {
+		b, _ := json.Marshal(s)
+		lines = append(lines, string(b))
+	}
+	if err := os.WriteFile(transcriptFile, []byte(strings.Join(lines, "\n")+"\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := map[string]interface{}{"transcript_path": transcriptFile}
+	res := e.EvaluateToolCall("write_to_file", map[string]interface{}{"TargetFile": ".env"}, ctx)
+	if res.Source == "USER-APPROVED" {
+		t.Fatalf("expected the unrelated 'frontend.env' approval NOT to authorize writing '.env', got %+v", res)
+	}
+	if res.Decision != "deny" {
+		t.Fatalf("expected the provider's deny decision to be honored, got %s", res.Decision)
+	}
+}
+
+// TestSafeLocalGitCommandHandlesQuotedArguments guards against a regression where a naive
+// whitespace tokenizer (strings.Fields) shattered quoted commit messages into separate
+// words, so an ordinary English word that also happens to be a risky git flag (reset,
+// clean, drop, restore, remote, clear) inside a quoted -m argument spuriously disqualified
+// an otherwise-safe local commit from the fast path.
+func TestSafeLocalGitCommandHandlesQuotedArguments(t *testing.T) {
+	safeCases := []string{
+		`git commit -m "clean up dead code"`,
+		`git commit -m "reset defaults to sane values"`,
+		`git commit -m "drop unused import"`,
+		`git commit -m 'restore the original behavior'`,
+	}
+	for _, c := range safeCases {
+		if !evaluator.IsSafeLocalGitCommand(c) {
+			t.Errorf("expected %q to be fast-path safe (quoted commit message), got unsafe", c)
+		}
+	}
+
+	// A risky flag as a real standalone token (not inside quotes) must still be caught.
+	unsafeCases := []string{
+		`git push --force origin main`,
+		`git checkout .`,
+		`git checkout -- somefile.txt`,
+	}
+	for _, c := range unsafeCases {
+		if evaluator.IsSafeLocalGitCommand(c) {
+			t.Errorf("expected %q to be unsafe, got fast-path safe", c)
+		}
 	}
 }

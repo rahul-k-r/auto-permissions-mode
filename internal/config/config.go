@@ -47,6 +47,11 @@ type Config struct {
 	DebugLog                    string   `json:"debug_log,omitempty"`
 	ShadowMode                  bool     `json:"shadow_mode,omitempty"`
 	ProtectedPaths              []string `json:"protected_paths"`
+	APIKey                      string   `json:"api_key,omitempty"`
+	GeminiAPIKey                string   `json:"gemini_api_key,omitempty"`
+	AnthropicAPIKey             string   `json:"anthropic_api_key,omitempty"`
+	OpenAIAPIKey                string   `json:"openai_api_key,omitempty"`
+	OpenRouterAPIKey            string   `json:"openrouter_api_key,omitempty"`
 }
 
 // NewDefaultConfig returns a Config initialized with default settings.
@@ -131,14 +136,17 @@ func LoadConfig() Config {
 	for _, path := range GetConfigSearchPaths() {
 		if fi, err := os.Stat(path); err == nil && !fi.IsDir() {
 			data, err := os.ReadFile(path)
-			if err == nil {
-				var fileCfg Config
-				if err := json.Unmarshal(data, &fileCfg); err == nil {
-					// Merge non-zero fields
-					mergeConfig(&cfg, &fileCfg, data)
-					break
-				}
+			if err != nil {
+				continue
 			}
+			var rawMap map[string]interface{}
+			if err := json.Unmarshal(data, &rawMap); err != nil {
+				// Malformed JSON syntax — the whole file is unusable, try the next
+				// candidate (mirrors Python's json.load try/except continue).
+				continue
+			}
+			mergeConfig(&cfg, rawMap)
+			break
 		}
 	}
 
@@ -146,82 +154,79 @@ func LoadConfig() Config {
 	return cfg
 }
 
-func mergeConfig(dst *Config, src *Config, raw []byte) {
-	var rawMap map[string]interface{}
-	if err := json.Unmarshal(raw, &rawMap); err != nil {
-		return
+// mergeConfig applies each present, correctly-typed key from rawMap onto dst. Unlike
+// unmarshaling the whole file into a typed Config struct, a single wrong-typed key (e.g.
+// num_ctx given as a string) only skips that one key — every other override in the file
+// still applies, matching Python's dict-based config.update() semantics instead of Go's
+// unmarshal-the-whole-struct-or-nothing behavior.
+func mergeConfig(dst *Config, rawMap map[string]interface{}) {
+	str := func(field *string, key string) {
+		if v, ok := rawMap[key]; ok {
+			if s, ok := v.(string); ok {
+				*field = s
+			}
+		}
+	}
+	boolean := func(field *bool, key string) {
+		if v, ok := rawMap[key]; ok {
+			if b, ok := v.(bool); ok {
+				*field = b
+			}
+		}
+	}
+	num := func(field *float64, key string) {
+		if v, ok := rawMap[key]; ok {
+			if f, ok := v.(float64); ok {
+				*field = f
+			}
+		}
+	}
+	intField := func(field *int, key string) {
+		if v, ok := rawMap[key]; ok {
+			if f, ok := v.(float64); ok {
+				*field = int(f)
+			}
+		}
 	}
 
-	if _, ok := rawMap["provider"]; ok {
-		dst.Provider = src.Provider
-	}
-	if _, ok := rawMap["endpoint"]; ok {
-		dst.Endpoint = src.Endpoint
-	}
-	if _, ok := rawMap["model"]; ok {
-		dst.Model = src.Model
-	}
-	if _, ok := rawMap["num_ctx"]; ok {
-		dst.NumCtx = src.NumCtx
-	}
-	if _, ok := rawMap["temperature"]; ok {
-		dst.Temperature = src.Temperature
-	}
-	if _, ok := rawMap["timeout_seconds"]; ok {
-		dst.TimeoutSeconds = src.TimeoutSeconds
-	}
-	if _, ok := rawMap["fallback_to_cloud"]; ok {
-		dst.FallbackToCloud = src.FallbackToCloud
-	}
-	if _, ok := rawMap["cloud_provider"]; ok {
-		dst.CloudProvider = src.CloudProvider
-	}
-	if _, ok := rawMap["cloud_model"]; ok {
-		dst.CloudModel = src.CloudModel
-	}
-	if _, ok := rawMap["cloud_timeout_seconds"]; ok {
-		dst.CloudTimeoutSeconds = src.CloudTimeoutSeconds
-	}
-	if _, ok := rawMap["total_deadline_seconds"]; ok {
-		dst.TotalDeadlineSeconds = src.TotalDeadlineSeconds
-	}
-	if _, ok := rawMap["fallback_action"]; ok {
-		dst.FallbackAction = src.FallbackAction
-	}
-	if _, ok := rawMap["fast_path_read_only"]; ok {
-		dst.FastPathReadOnly = src.FastPathReadOnly
-	}
-	if _, ok := rawMap["max_tokens"]; ok {
-		dst.MaxTokens = src.MaxTokens
-	}
-	if _, ok := rawMap["enable_remediation_directives"]; ok {
-		dst.EnableRemediationDirectives = src.EnableRemediationDirectives
-	}
-	if _, ok := rawMap["audit_retention_days"]; ok {
-		dst.AuditRetentionDays = src.AuditRetentionDays
-	}
-	if _, ok := rawMap["audit_max_lines"]; ok {
-		dst.AuditMaxLines = src.AuditMaxLines
-	}
-	if _, ok := rawMap["audit_trim_interval_seconds"]; ok {
-		dst.AuditTrimIntervalSeconds = src.AuditTrimIntervalSeconds
-	}
-	if _, ok := rawMap["policy_mode"]; ok {
-		dst.PolicyMode = src.PolicyMode
-	}
-	if _, ok := rawMap["auto_start_local_engine"]; ok {
-		dst.AutoStartLocalEngine = src.AutoStartLocalEngine
-	}
-	if _, ok := rawMap["custom_policy_path"]; ok {
-		dst.CustomPolicyPath = src.CustomPolicyPath
-	}
-	if _, ok := rawMap["debug_log"]; ok {
-		dst.DebugLog = src.DebugLog
-	}
-	if _, ok := rawMap["shadow_mode"]; ok {
-		dst.ShadowMode = src.ShadowMode
-	}
-	if _, ok := rawMap["protected_paths"]; ok {
-		dst.ProtectedPaths = src.ProtectedPaths
+	str(&dst.Provider, "provider")
+	str(&dst.Endpoint, "endpoint")
+	str(&dst.Model, "model")
+	intField(&dst.NumCtx, "num_ctx")
+	num(&dst.Temperature, "temperature")
+	num(&dst.TimeoutSeconds, "timeout_seconds")
+	boolean(&dst.FallbackToCloud, "fallback_to_cloud")
+	str(&dst.CloudProvider, "cloud_provider")
+	str(&dst.CloudModel, "cloud_model")
+	num(&dst.CloudTimeoutSeconds, "cloud_timeout_seconds")
+	num(&dst.TotalDeadlineSeconds, "total_deadline_seconds")
+	str(&dst.FallbackAction, "fallback_action")
+	boolean(&dst.FastPathReadOnly, "fast_path_read_only")
+	intField(&dst.MaxTokens, "max_tokens")
+	boolean(&dst.EnableRemediationDirectives, "enable_remediation_directives")
+	intField(&dst.AuditRetentionDays, "audit_retention_days")
+	intField(&dst.AuditMaxLines, "audit_max_lines")
+	intField(&dst.AuditTrimIntervalSeconds, "audit_trim_interval_seconds")
+	str(&dst.PolicyMode, "policy_mode")
+	boolean(&dst.AutoStartLocalEngine, "auto_start_local_engine")
+	str(&dst.CustomPolicyPath, "custom_policy_path")
+	str(&dst.DebugLog, "debug_log")
+	boolean(&dst.ShadowMode, "shadow_mode")
+	str(&dst.APIKey, "api_key")
+	str(&dst.GeminiAPIKey, "gemini_api_key")
+	str(&dst.AnthropicAPIKey, "anthropic_api_key")
+	str(&dst.OpenAIAPIKey, "openai_api_key")
+	str(&dst.OpenRouterAPIKey, "openrouter_api_key")
+
+	if v, ok := rawMap["protected_paths"]; ok {
+		if list, ok := v.([]interface{}); ok {
+			paths := make([]string, 0, len(list))
+			for _, item := range list {
+				if s, ok := item.(string); ok {
+					paths = append(paths, s)
+				}
+			}
+			dst.ProtectedPaths = paths
+		}
 	}
 }

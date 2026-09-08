@@ -88,11 +88,7 @@ func ComputePermissionOverrides(toolName string, toolArgs map[string]interface{}
 		}
 		target = strings.TrimSpace(target)
 		if target != "" {
-			return []string{
-				"write_file(" + target + ")",
-				"write_to_file(" + target + ")",
-				"replace_file_content(" + target + ")",
-			}
+			return []string{"write_file(" + target + ")"}
 		}
 		return nil
 	}

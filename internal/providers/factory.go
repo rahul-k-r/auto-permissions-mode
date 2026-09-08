@@ -1,7 +1,6 @@
 package providers
 
 import (
-	"os"
 	"strings"
 	"time"
 
@@ -33,16 +32,16 @@ func GetProvider(cfg config.Config) Provider {
 	var primary Provider
 
 	if provName == "gemini" {
-		apiKey := ResolveAPIKey("GEMINI_API_KEY", "gemini_api_key")
-		return NewGeminiProvider(apiKey, model, temp, timeout, maxTokens)
+		apiKey := ResolveAPIKey("GEMINI_API_KEY", cfg.GeminiAPIKey, cfg.APIKey)
+		primary = NewGeminiProvider(apiKey, model, temp, timeout, maxTokens)
 	} else if provName == "anthropic" {
-		apiKey := ResolveAPIKey("ANTHROPIC_API_KEY", "anthropic_api_key")
-		return NewAnthropicProvider(apiKey, model, temp, timeout, maxTokens)
+		apiKey := ResolveAPIKey("ANTHROPIC_API_KEY", cfg.AnthropicAPIKey, cfg.APIKey)
+		primary = NewAnthropicProvider(apiKey, model, temp, timeout, maxTokens)
 	} else if provName == "ollama" {
 		primary = NewOllamaProvider(endpoint, model, numCtx, temp, timeout, maxTokens)
 	} else {
 		// llamacpp, openai, or generic openai-compatible
-		apiKey := ResolveAPIKey("OPENAI_API_KEY", "openai_api_key")
+		apiKey := ResolveAPIKey("OPENAI_API_KEY", cfg.OpenAIAPIKey, cfg.APIKey)
 		primary = NewOpenAICompatibleProvider(endpoint, model, apiKey, temp, timeout, maxTokens)
 	}
 
@@ -56,7 +55,7 @@ func GetProvider(cfg config.Config) Provider {
 
 		var secondary Provider
 		if cloudProv == "anthropic" {
-			apiKey := ResolveAPIKey("ANTHROPIC_API_KEY", "anthropic_api_key")
+			apiKey := ResolveAPIKey("ANTHROPIC_API_KEY", cfg.AnthropicAPIKey, cfg.APIKey)
 			secondary = NewAnthropicProvider(apiKey, cloudModel, temp, cloudTimeout, maxTokens)
 		} else if cloudProv == "openai" || cloudProv == "openrouter" || cloudProv == "groq" {
 			cloudEP := "https://api.openai.com/v1/chat/completions"
@@ -65,20 +64,26 @@ func GetProvider(cfg config.Config) Provider {
 			} else if cloudProv == "groq" {
 				cloudEP = "https://api.groq.com/openai/v1/chat/completions"
 			}
-			apiKey := ResolveAPIKey("OPENAI_API_KEY", "openai_api_key")
+			apiKey := ResolveAPIKey("OPENAI_API_KEY", cfg.OpenAIAPIKey, cfg.APIKey)
 			if cloudProv == "openrouter" {
-				if k := os.Getenv("OPENROUTER_API_KEY"); k != "" {
+				if k := ResolveAPIKey("OPENROUTER_API_KEY", cfg.OpenRouterAPIKey, cfg.APIKey); k != "" {
 					apiKey = k
 				}
 			}
-			defModel := "gpt-4o-mini"
+			// Only OpenAI itself defaults to gpt-4o-mini; Groq/OpenRouter get "auto" so
+			// the provider resolves an available model via the endpoint's /models list
+			// instead of requesting a model name ("gpt-4o-mini") that endpoint doesn't serve.
+			defModel := "auto"
+			if cloudProv == "openai" {
+				defModel = "gpt-4o-mini"
+			}
 			if cloudModel != "" {
 				defModel = cloudModel
 			}
 			secondary = NewOpenAICompatibleProvider(cloudEP, defModel, apiKey, temp, cloudTimeout, maxTokens)
 		} else {
 			// default gemini
-			apiKey := ResolveAPIKey("GEMINI_API_KEY", "gemini_api_key")
+			apiKey := ResolveAPIKey("GEMINI_API_KEY", cfg.GeminiAPIKey, cfg.APIKey)
 			secondary = NewGeminiProvider(apiKey, cloudModel, temp, cloudTimeout, maxTokens)
 		}
 

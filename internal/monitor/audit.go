@@ -109,7 +109,18 @@ func TrimAuditLog(retentionDays, maxLines int, auditPath string) int {
 	pruned := totalBefore - len(surviving)
 	if pruned > 0 {
 		out := strings.Join(surviving, "\n") + "\n"
-		_ = os.WriteFile(auditPath, []byte(out), 0644)
+		// Write-then-rename instead of writing the audit file in place: a concurrent
+		// hook process's RecordAuditEvent append (or a second trim) racing an in-place
+		// WriteFile could lose the append or leave the file truncated/corrupted. Renaming
+		// a fully-written temp file over the original is atomic, and if it fails (e.g. a
+		// locked file on Windows) the original is left untouched — safe to retry next
+		// interval, matching the crash-safe behavior of the Python implementation.
+		tmpPath := auditPath + ".tmp"
+		if err := os.WriteFile(tmpPath, []byte(out), 0644); err == nil {
+			if err := os.Rename(tmpPath, auditPath); err != nil {
+				_ = os.Remove(tmpPath)
+			}
+		}
 	}
 	return pruned
 }
@@ -152,7 +163,7 @@ func RecordAuditEvent(toolName string, toolArgs map[string]interface{}, decision
 	if err != nil {
 		return
 	}
-	logDir := filepath.Join(home, ".gemini", "logs")
+	logDir := filepath.Join(home, ".gemini", "antigravity", "logs")
 	_ = os.MkdirAll(logDir, 0755)
 
 	auditFile := filepath.Join(logDir, "audit.jsonl")

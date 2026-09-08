@@ -31,6 +31,15 @@ func ParseOptionString(raw string) (string, string) {
 	return text, ""
 }
 
+// resolvePathBestEffort mirrors Python's Path(p).resolve(): absolute-ify, falling back to
+// the original string if resolution fails.
+func resolvePathBestEffort(p string) string {
+	if abs, err := filepath.Abs(p); err == nil {
+		return abs
+	}
+	return p
+}
+
 func normalizeText(t string) string {
 	s := regexp.MustCompile(`^\s*[-*]\s*`).ReplaceAllString(t, "")
 	s = stripRecommendedPrefix(s)
@@ -280,16 +289,27 @@ func CheckRecentUserApproval(toolName string, toolArgs map[string]interface{}, c
 			target, _ = toolArgs["AbsolutePath"].(string)
 		}
 		target = strings.TrimSpace(target)
-		normTarget := strings.ToLower(filepath.Clean(target))
-		targetName := strings.ToLower(filepath.Base(target))
+		if target == "" {
+			return ""
+		}
+		targetResolved := resolvePathBestEffort(target)
 
+		// Exact resolved-path equality per approved token — not a substring/suffix match,
+		// which would let an unrelated prior approval (e.g. one mentioning any ".env"-suffixed
+		// filename) silently authorize writes to an unrelated protected file.
 		for approvedCmd := range approvedCommands {
-			if strings.Contains(approvedCmd, target) || strings.Contains(strings.ToLower(approvedCmd), normTarget) || strings.Contains(strings.ToLower(approvedCmd), targetName) {
-				return "Verified user authorization via ask_question for file: '" + target + "'"
+			for _, tok := range strings.Fields(approvedCmd) {
+				cleanTok := strings.Trim(tok, "'\"`")
+				if cleanTok == "" {
+					continue
+				}
+				if resolvePathBestEffort(cleanTok) == targetResolved {
+					return "Verified user authorization via ask_question for file: '" + target + "'"
+				}
 			}
 		}
 		for approvedFile := range approvedFiles {
-			if target == approvedFile || targetName == strings.ToLower(approvedFile) || strings.HasSuffix(normTarget, strings.ToLower(approvedFile)) {
+			if resolvePathBestEffort(approvedFile) == targetResolved {
 				return "Verified user authorization via ask_question for file: '" + target + "'"
 			}
 		}

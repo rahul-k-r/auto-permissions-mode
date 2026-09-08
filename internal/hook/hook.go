@@ -35,9 +35,26 @@ var AuditRecorder = func(toolName string, toolArgs map[string]interface{}, decis
 	monitor.RecordAuditEvent(toolName, toolArgs, decision, reason, latencyMS, source, context, cfg)
 }
 
-func RunHook(reader io.Reader, writer io.Writer) error {
-	rawInput, err := io.ReadAll(reader)
-	if err != nil || len(strings.TrimSpace(string(rawInput))) == 0 {
+func RunHook(reader io.Reader, writer io.Writer) (err error) {
+	// Last-resort safety net: any panic below (a provider HTTP bug, an unexpected nil,
+	// etc.) must still produce a valid decision JSON line on stdout — Claude Code's hook
+	// contract expects one, and a bare process crash with no output is treated as a hard
+	// failure rather than a graceful ask.
+	fallbackAction := "force_ask"
+	defer func() {
+		if r := recover(); r != nil {
+			out := HookOutput{
+				Decision: fallbackAction,
+				Reason:   fmt.Sprintf("Hook evaluation panic (%v). Deferring to '%s'.", r, fallbackAction),
+			}
+			b, _ := json.Marshal(out)
+			fmt.Fprintln(writer, string(b))
+			err = nil
+		}
+	}()
+
+	rawInput, readErr := io.ReadAll(reader)
+	if readErr != nil || len(strings.TrimSpace(string(rawInput))) == 0 {
 		out := HookOutput{
 			Decision: "force_ask",
 			Reason:   "No input received on hook stdin.",
@@ -48,8 +65,14 @@ func RunHook(reader io.Reader, writer io.Writer) error {
 	}
 
 	cfg := ConfigLoader()
+	if cfg.FallbackAction != "" {
+		fallbackAction = cfg.FallbackAction
+		if strings.EqualFold(fallbackAction, "ask") {
+			fallbackAction = "force_ask"
+		}
+	}
 	var (
-		toolName  string
+		toolName  = "unknown"
 		toolArgs  map[string]interface{}
 		context   map[string]interface{}
 		result    evaluator.DecisionResult
@@ -57,14 +80,12 @@ func RunHook(reader io.Reader, writer io.Writer) error {
 	)
 
 	var data map[string]interface{}
-	if err := json.Unmarshal(rawInput, &data); err != nil {
-		fallback := cfg.FallbackAction
-		if strings.EqualFold(fallback, "ask") || fallback == "" {
-			fallback = "force_ask"
-		}
+	if unmarshalErr := json.Unmarshal(rawInput, &data); unmarshalErr != nil {
+		reason := fmt.Sprintf("Hook evaluation error (%v). Deferring to '%s'.", unmarshalErr, fallbackAction)
+		AuditRecorder(toolName, toolArgs, strings.ToUpper(fallbackAction), reason, 0, "ERROR", nil, cfg)
 		out := HookOutput{
-			Decision: fallback,
-			Reason:   fmt.Sprintf("Hook evaluation error (%v). Deferring to '%s'.", err, fallback),
+			Decision: fallbackAction,
+			Reason:   reason,
 		}
 		b, _ := json.Marshal(out)
 		fmt.Fprintln(writer, string(b))
@@ -122,8 +143,9 @@ func RunHook(reader io.Reader, writer io.Writer) error {
 	)
 
 	if cfg.DebugLog != "" {
-		if f, err := os.OpenFile(cfg.DebugLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
-			_, _ = fmt.Fprintf(f, "INPUT: %s\nOUTPUT: %s\n\n", strings.TrimSpace(string(rawInput)), result.Decision)
+		if f, openErr := os.OpenFile(cfg.DebugLog, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); openErr == nil {
+			resultJSON, _ := json.Marshal(result)
+			_, _ = fmt.Fprintf(f, "INPUT: %s\nOUTPUT: %s\n\n", strings.TrimSpace(string(rawInput)), string(resultJSON))
 			_ = f.Close()
 		}
 	}

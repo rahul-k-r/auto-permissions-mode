@@ -24,7 +24,7 @@ type GeminiProvider struct {
 
 func NewGeminiProvider(apiKey, model string, temp float64, timeout time.Duration, maxTokens int) *GeminiProvider {
 	if apiKey == "" {
-		apiKey = ResolveAPIKey("GEMINI_API_KEY", "gemini_api_key")
+		apiKey = ResolveAPIKey("GEMINI_API_KEY", "", "")
 	}
 	if model == "" || model == "auto" || model == "default" {
 		model = "gemini-flash-lite-latest"
