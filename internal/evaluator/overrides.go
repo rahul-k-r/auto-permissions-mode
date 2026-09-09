@@ -47,7 +47,7 @@ func ComputePermissionOverrides(toolName string, toolArgs map[string]interface{}
 		return overrides
 	}
 
-	// 3. Web URL fetching (read_url_content)
+	// 3. Web URL fetching (read_url_content) & search_web
 	if cleanTool == "read_url_content" {
 		rawURL, _ := toolArgs["Url"].(string)
 		rawURL = strings.TrimSpace(rawURL)
@@ -63,11 +63,19 @@ func ComputePermissionOverrides(toolName string, toolArgs map[string]interface{}
 						"read_url(" + safeURL + ")",
 						"url(" + safeDomain + ")",
 						"url(" + safeURL + ")",
+						"read_url(*)",
 					}
 				}
 			}
 		}
 		return nil
+	}
+
+	if cleanTool == "search_web" {
+		return []string{
+			"search_web(*)",
+			"read_url(*)",
+		}
 	}
 
 	// 4. Terminal commands (run_command)

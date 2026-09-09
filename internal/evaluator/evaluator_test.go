@@ -553,6 +553,7 @@ func TestComputePermissionOverridesHelpers(t *testing.T) {
 	})
 	hasHost := false
 	hasFull := false
+	hasWildcard := false
 	for _, o := range urlOverrides {
 		if o == "read_url(antigravity.google)" {
 			hasHost = true
@@ -560,9 +561,26 @@ func TestComputePermissionOverridesHelpers(t *testing.T) {
 		if o == "url(https://antigravity.google/docs/hooks)" {
 			hasFull = true
 		}
+		if o == "read_url(*)" {
+			hasWildcard = true
+		}
 	}
-	if !hasHost || !hasFull {
+	if !hasHost || !hasFull || !hasWildcard {
 		t.Fatalf("missing url overrides: %v", urlOverrides)
+	}
+
+	// 2b. Web search
+	searchOverrides := evaluator.ComputePermissionOverrides("search_web", map[string]interface{}{
+		"query": "openclaw",
+	})
+	hasSearchWildcard := false
+	for _, o := range searchOverrides {
+		if o == "search_web(*)" {
+			hasSearchWildcard = true
+		}
+	}
+	if !hasSearchWildcard {
+		t.Fatalf("missing search_web overrides: %v", searchOverrides)
 	}
 
 	// 3. Command

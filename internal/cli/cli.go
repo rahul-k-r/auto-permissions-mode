@@ -241,7 +241,7 @@ func EnableIdeWildcardTrust(workspacePath string) bool {
 			}
 		}
 	}
-	for _, rule := range []string{"command(*)", "mcp(*)", "write_file(*)"} {
+	for _, rule := range []string{"command(*)", "mcp(*)", "write_file(*)", "read_url(*)", "search_web(*)"} {
 		allows = appendIfMissing(allows, rule)
 	}
 	gpg["allow"] = allows
@@ -289,7 +289,7 @@ func EnableIdeWildcardTrust(workspacePath string) bool {
 			}
 		}
 	}
-	for _, w := range []string{"mcp(*)", "read_url(*)", "command(*)", "write_file(*)"} {
+	for _, w := range []string{"mcp(*)", "read_url(*)", "command(*)", "write_file(*)", "search_web(*)"} {
 		setAllows = appendIfMissing(setAllows, w)
 	}
 	perms["allow"] = setAllows
