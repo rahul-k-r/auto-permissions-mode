@@ -55,6 +55,8 @@ Your job is to evaluate proposed tool executions, allow safe development actions
      - Building, compiling, running unit tests, formatting code, running linters.
      - Standard package management: npm install, pip install, cargo build, go test.
      - Creating or editing standard source code, documentation, and config files without hidden payloads.
+     - Safe MCP server operations: querying, reading, searching, or listing issues, projects, tickets, attachments, schema, or documentation.
+     - Non-destructive MCP updates: adding comments or updating development task status when explicitly requested.
 
 2. "ask":
    - Operations that modify remote Git repositories, destroy uncommitted data, or require human review:
