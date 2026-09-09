@@ -4,9 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
+	"time"
+
+	"github.com/rahul-k-r/auto-permissions-mode/internal/config"
 )
 
 // Hook overrides for unit tests
@@ -413,4 +418,122 @@ func UninstallHook(isGlobal, purge bool) bool {
 		_ = os.Remove(configFile)
 	}
 	return true
+}
+
+func VerifyHook() bool {
+	hookFile := GetHooksFile(true)
+	if _, err := os.Stat(hookFile); err != nil {
+		hookFile = GetHooksFile(false)
+	}
+	data, err := os.ReadFile(hookFile)
+	if err != nil {
+		fmt.Println("❌ No hooks.json file found. Run 'auto-permissions install' first.")
+		return false
+	}
+
+	var root map[string]interface{}
+	if err := json.Unmarshal(stripBOM(data), &root); err != nil {
+		fmt.Printf("❌ Error parsing hooks.json: %v\n", err)
+		return false
+	}
+
+	entry, _ := root["auto-permissions-mode"].(map[string]interface{})
+	preTool, _ := entry["PreToolUse"].([]interface{})
+	if len(preTool) == 0 {
+		fmt.Println("❌ No PreToolUse hook configuration found in hooks.json.")
+		return false
+	}
+	firstPreTool, _ := preTool[0].(map[string]interface{})
+	hooksList, _ := firstPreTool["hooks"].([]interface{})
+	if len(hooksList) == 0 {
+		fmt.Println("❌ No hooks command list found.")
+		return false
+	}
+	firstHook, _ := hooksList[0].(map[string]interface{})
+	cmdStr, _ := firstHook["command"].(string)
+	if cmdStr == "" {
+		fmt.Println("❌ No command defined in hooks.json.")
+		return false
+	}
+
+	mockPayload := `{"toolCall":{"name":"view_file","args":{"AbsolutePath":"README.md"}},"stepIdx":1,"conversationId":"verify-test-run"}`
+
+	t0 := time.Now()
+	var proc *exec.Cmd
+	if runtime.GOOS == "windows" {
+		proc = exec.Command("cmd", "/C", cmdStr)
+	} else {
+		proc = exec.Command("sh", "-c", cmdStr)
+	}
+	proc.Stdin = strings.NewReader(mockPayload)
+	out, err := proc.Output()
+	elapsedMS := float64(time.Since(t0).Microseconds()) / 1000.0
+
+	if err != nil {
+		fmt.Printf("❌ Hook invocation failed: %v\n", err)
+		return false
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(out, &result); err != nil {
+		fmt.Printf("❌ Unexpected hook output: %s\n", string(out))
+		return false
+	}
+
+	dec, _ := result["decision"].(string)
+	decUpper := strings.ToUpper(dec)
+	if decUpper == "ALLOW" || decUpper == "ASK" || decUpper == "FORCE_ASK" || decUpper == "DENY" {
+		reason, _ := result["reason"].(string)
+		fmt.Println("\n===============================================================")
+		fmt.Println(" 🚀 Antigravity PreToolUse Hook: VERIFIED & ACTIVE")
+		fmt.Println("===============================================================")
+		fmt.Printf(" Hook Bridge Latency : %.1fms\n", elapsedMS)
+		fmt.Printf(" Decision            : %s (%s)\n", decUpper, reason)
+		fmt.Println(" Protected Surfaces  : Antigravity IDE, Antigravity 2.0, VS Code, agy CLI")
+		fmt.Println("===============================================================")
+		return true
+	}
+
+	fmt.Printf("❌ Unexpected decision from hook: %s\n", string(out))
+	return false
+}
+
+func ShowStatus() {
+	globalHook := GetHooksFile(true)
+	localHook := GetHooksFile(false)
+
+	globalInstalled := "NOT INSTALLED"
+	if _, err := os.Stat(globalHook); err == nil {
+		if data, err := os.ReadFile(globalHook); err == nil {
+			var m map[string]interface{}
+			if json.Unmarshal(stripBOM(data), &m) == nil {
+				if _, ok := m["auto-permissions-mode"]; ok {
+					globalInstalled = "INSTALLED"
+				}
+			}
+		}
+	}
+
+	localInstalled := "NOT INSTALLED"
+	if _, err := os.Stat(localHook); err == nil {
+		if data, err := os.ReadFile(localHook); err == nil {
+			var m map[string]interface{}
+			if json.Unmarshal(stripBOM(data), &m) == nil {
+				if _, ok := m["auto-permissions-mode"]; ok {
+					localInstalled = "INSTALLED"
+				}
+			}
+		}
+	}
+
+	cfg := config.LoadConfig()
+
+	fmt.Println("\n===============================================================")
+	fmt.Println(" 🛡️  Auto Permissions Mode (Go Native): Status & Health")
+	fmt.Println("===============================================================")
+	fmt.Printf("Policy Mode        : %s\n", strings.ToUpper(cfg.PolicyMode))
+	fmt.Printf("Fallback Action    : %s\n", strings.ToUpper(cfg.FallbackAction))
+	fmt.Printf("Global Hook        : %s (~/.gemini/config/hooks.json)\n", globalInstalled)
+	fmt.Printf("Local Hook         : %s (.agents/hooks.json)\n", localInstalled)
+	fmt.Println("===============================================================")
 }

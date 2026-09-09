@@ -10,6 +10,7 @@ import (
 	"github.com/rahul-k-r/auto-permissions-mode/internal/config"
 	"github.com/rahul-k-r/auto-permissions-mode/internal/hardware"
 	"github.com/rahul-k-r/auto-permissions-mode/internal/hook"
+	"github.com/rahul-k-r/auto-permissions-mode/internal/monitor"
 	"github.com/rahul-k-r/auto-permissions-mode/internal/policy"
 )
 
@@ -29,6 +30,9 @@ Commands:
   trust-ide      Enable IDE wildcard trust or decline for specified workspace
   detect         Detect GPU VRAM and hardware tier
   policy         Inspect or switch active policy mode (balanced, strict, yolo)
+  monitor        Open live terminal audit dashboard showing real-time tool calls & decisions (alias: board)
+  status         Show installation state and security policy status
+  verify         Verify live Antigravity hook pipeline bridge
   version        Print binary version
 `)
 }
@@ -87,6 +91,17 @@ func main() {
 			fmt.Printf("Normalized policy mode: %s\n", m)
 		} else {
 			fmt.Printf("Active policy mode: %s\n", cfg.PolicyMode)
+		}
+	case "monitor", "board":
+		if err := monitor.RunLiveBoard(); err != nil {
+			fmt.Fprintf(os.Stderr, "Monitor error: %v\n", err)
+			os.Exit(1)
+		}
+	case "status":
+		cli.ShowStatus()
+	case "verify":
+		if !cli.VerifyHook() {
+			os.Exit(1)
 		}
 	case "version", "--version", "-v":
 		fmt.Printf("auto-permissions %s\n", version)
