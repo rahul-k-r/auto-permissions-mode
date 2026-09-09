@@ -119,8 +119,9 @@ var (
 	trustMutex              sync.Mutex
 
 	// Mock hooks for unit testing
-	GetTrustedWorkspacesHook  func() map[string]bool
-	GetDeclinedWorkspacesHook func() map[string]bool
+	GetTrustedWorkspacesHook   func() map[string]bool
+	GetDeclinedWorkspacesHook  func() map[string]bool
+	EnsureWorkspaceTrustedHook func(string)
 )
 
 func homeDir() string {
@@ -230,6 +231,81 @@ func GetDeclinedWorkspaces() map[string]bool {
 	declinedWorkspacesCache = declined
 	declinedMtime = dFi.ModTime()
 	return declined
+}
+
+// EnsureWorkspaceTrusted registers the workspace in trustedFolders.json and settings.json in the background without interrupting evaluation.
+func EnsureWorkspaceTrusted(targetWS string) {
+	if EnsureWorkspaceTrustedHook != nil {
+		EnsureWorkspaceTrustedHook(targetWS)
+		return
+	}
+	if targetWS == "" {
+		return
+	}
+	abs, err := filepath.Abs(targetWS)
+	if err != nil {
+		abs = targetWS
+	}
+	normWS := strings.ToLower(abs)
+	trusted := GetTrustedWorkspaces()
+	if trusted[normWS] {
+		return
+	}
+	declined := GetDeclinedWorkspaces()
+	if declined[normWS] {
+		return
+	}
+
+	home := homeDir()
+	if home == "" {
+		return
+	}
+	tfFile := filepath.Join(home, ".gemini", "trustedFolders.json")
+	_ = os.MkdirAll(filepath.Dir(tfFile), 0755)
+
+	tfData := make(map[string]string)
+	if data, err := os.ReadFile(tfFile); err == nil {
+		_ = json.Unmarshal(data, &tfData)
+	}
+	tfData[filepath.ToSlash(normWS)] = "TRUST_PARENT"
+	if out, err := json.MarshalIndent(tfData, "", "  "); err == nil {
+		_ = os.WriteFile(tfFile, out, 0644)
+	}
+
+	settingsFile := filepath.Join(home, ".gemini", "antigravity-cli", "settings.json")
+	if data, err := os.ReadFile(settingsFile); err == nil {
+		var sMap map[string]interface{}
+		if err := json.Unmarshal(data, &sMap); err == nil {
+			var twList []string
+			if rawTW, ok := sMap["trustedWorkspaces"].([]interface{}); ok {
+				for _, itm := range rawTW {
+					if s, ok := itm.(string); ok {
+						twList = append(twList, s)
+					}
+				}
+			}
+			found := false
+			for _, w := range twList {
+				if strings.EqualFold(w, abs) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				twList = append(twList, abs)
+				sMap["trustedWorkspaces"] = twList
+				if out, err := json.MarshalIndent(sMap, "", "  "); err == nil {
+					_ = os.WriteFile(settingsFile, out, 0644)
+				}
+			}
+		}
+	}
+
+	trustMutex.Lock()
+	if trustedWorkspacesCache != nil {
+		trustedWorkspacesCache[normWS] = true
+	}
+	trustMutex.Unlock()
 }
 
 // GitIndexRepairRunner hook for mocking git repair in tests
@@ -345,6 +421,62 @@ func (e *SecurityEvaluator) EvaluateToolCall(toolName string, toolArgs map[strin
 		}
 	}
 
+	// Workspace Trust Gate: Force-ask workspace trust on the very first tool call (including fast paths)
+	var targetWS string
+	if context != nil {
+		if wsList, ok := context["workspace_paths"].([]string); ok && len(wsList) > 0 && wsList[0] != "" {
+			if abs, err := filepath.Abs(wsList[0]); err == nil {
+				targetWS = abs
+			}
+		} else if wsAny, ok := context["workspace_paths"].([]interface{}); ok && len(wsAny) > 0 {
+			if s, ok := wsAny[0].(string); ok && s != "" {
+				if abs, err := filepath.Abs(s); err == nil {
+					targetWS = abs
+				}
+			}
+		}
+	}
+
+	if targetWS != "" {
+		normWS := strings.ToLower(targetWS)
+		trusted := GetTrustedWorkspaces()
+		if !trusted[normWS] {
+			declined := GetDeclinedWorkspaces()
+			if !declined[normWS] {
+				cmdLine, _ := toolArgs["CommandLine"].(string)
+				if cleanTool != "ask_question" &&
+					!strings.Contains(cmdLine, "trust-ide") &&
+					!strings.Contains(cmdLine, "auto_permissions.cli trust") &&
+					!strings.Contains(cmdLine, "auto-permissions trust") {
+					wsName := filepath.Base(targetWS)
+					alts := []Alternative{
+						{
+							Label:   fmt.Sprintf("Trust workspace '%s': enables Auto Permissions Mode to manage tool execution without redundant IDE popups", wsName),
+							Command: fmt.Sprintf("python -m auto_permissions.cli trust-ide --workspace \"%s\"", targetWS),
+						},
+						{
+							Label:   "Do not trust workspace: keep manual IDE approval prompts in this workspace",
+							Command: fmt.Sprintf("python -m auto_permissions.cli trust-ide --decline --workspace \"%s\"", targetWS),
+						},
+					}
+					directive := BuildRemediationDirective(alts)
+					reason := fmt.Sprintf("Workspace '%s' is not in Antigravity's trusted workspaces. Trusting it enables Auto Permissions Mode to manage tool executions without redundant IDE popups.%s", wsName, directive)
+					decision := "deny"
+					if !e.enableRemediation {
+						decision = "force_ask"
+					}
+					return DecisionResult{
+						Decision:      decision,
+						AuditDecision: "ASK",
+						Reason:        reason,
+						Alternatives:  alts,
+						Source:        "WORKSPACE-TRUST",
+					}
+				}
+			}
+		}
+	}
+
 	// Fast path 0: Safe Antigravity internal brain artifacts
 	targetFile, _ := toolArgs["TargetFile"].(string)
 	if targetFile == "" {
@@ -395,55 +527,6 @@ func (e *SecurityEvaluator) EvaluateToolCall(toolName string, toolArgs map[strin
 			Reason:              fmt.Sprintf("Fast-path: Safe read-only inspection (%s).", cleanTool),
 			Source:              "FAST-PATH",
 			PermissionOverrides: ComputePermissionOverrides(cleanTool, toolArgs),
-		}
-	}
-
-	// Workspace Trust Gate: prompt user once per untrusted repository in VS Code / Antigravity
-	var targetWS string
-	if context != nil {
-		if wsList, ok := context["workspace_paths"].([]string); ok && len(wsList) > 0 && wsList[0] != "" {
-			if abs, err := filepath.Abs(wsList[0]); err == nil {
-				targetWS = abs
-			}
-		} else if wsAny, ok := context["workspace_paths"].([]interface{}); ok && len(wsAny) > 0 {
-			if s, ok := wsAny[0].(string); ok && s != "" {
-				if abs, err := filepath.Abs(s); err == nil {
-					targetWS = abs
-				}
-			}
-		}
-	}
-
-	if targetWS != "" {
-		normWS := strings.ToLower(targetWS)
-		trusted := GetTrustedWorkspaces()
-		if !trusted[normWS] {
-			declined := GetDeclinedWorkspaces()
-			if !declined[normWS] {
-				cmdLine, _ := toolArgs["CommandLine"].(string)
-				if !strings.Contains(cmdLine, "trust-ide") && cleanTool != "ask_question" {
-					wsName := filepath.Base(targetWS)
-					alts := []Alternative{
-						{
-							Label:   fmt.Sprintf("Trust workspace '%s': enables Auto Permissions Mode to manage tool execution without redundant IDE popups", wsName),
-							Command: fmt.Sprintf("python -m auto_permissions.cli trust-ide --workspace \"%s\"", targetWS),
-						},
-						{
-							Label:   "Do not trust workspace: keep manual IDE approval prompts in this workspace",
-							Command: fmt.Sprintf("python -m auto_permissions.cli trust-ide --decline --workspace \"%s\"", targetWS),
-						},
-					}
-					directive := BuildRemediationDirective(alts)
-					reason := fmt.Sprintf("Workspace '%s' is not in Antigravity's trusted workspaces. Trusting it enables Auto Permissions Mode to manage tool executions without redundant IDE popups.%s", wsName, directive)
-					return DecisionResult{
-						Decision:      "ask",
-						AuditDecision: "ASK",
-						Reason:        reason,
-						Alternatives:  alts,
-						Source:        "WORKSPACE-TRUST",
-					}
-				}
-			}
 		}
 	}
 

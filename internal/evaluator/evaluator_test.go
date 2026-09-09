@@ -725,7 +725,7 @@ func TestWorkspaceTrustGate(t *testing.T) {
 	fakeWS := filepath.Join(os.TempDir(), "untrusted_repo")
 	ctx := map[string]interface{}{"workspace_paths": []string{fakeWS}}
 
-	// 1. Untrusted workspace -> triggers WORKSPACE-TRUST ask
+	// 1. Untrusted workspace -> triggers WORKSPACE-TRUST deny on first tool call (including fast paths)
 	evaluator.GetTrustedWorkspacesHook = func() map[string]bool { return make(map[string]bool) }
 	evaluator.GetDeclinedWorkspacesHook = func() map[string]bool { return make(map[string]bool) }
 	defer func() {
@@ -733,50 +733,66 @@ func TestWorkspaceTrustGate(t *testing.T) {
 		evaluator.GetDeclinedWorkspacesHook = nil
 	}()
 
-	res := e.EvaluateToolCall("run_command", map[string]interface{}{"CommandLine": "npm test"}, ctx)
-	if res.Decision != "ask" {
-		t.Fatalf("expected ask for untrusted workspace, got %s", res.Decision)
+	// Fast path read-only tool is intercepted upfront
+	resView := e.EvaluateToolCall("view_file", map[string]interface{}{"AbsolutePath": filepath.Join(fakeWS, "main.py")}, ctx)
+	if resView.Decision != "deny" {
+		t.Fatalf("expected deny for untrusted workspace on view_file, got %s", resView.Decision)
 	}
-	if res.Source != "WORKSPACE-TRUST" {
-		t.Fatalf("expected WORKSPACE-TRUST source, got %s", res.Source)
+	if resView.Source != "WORKSPACE-TRUST" {
+		t.Fatalf("expected WORKSPACE-TRUST source, got %s", resView.Source)
 	}
-	if !strings.Contains(res.Reason, "trust-ide") {
-		t.Fatalf("expected trust-ide mention in reason")
+	if !strings.Contains(resView.Reason, "trust-ide") {
+		t.Fatalf("expected trust-ide in reason")
 	}
-	if !strings.Contains(res.Reason, "REMEDIATION DIRECTIVE") {
+	if !strings.Contains(resView.Reason, "REMEDIATION DIRECTIVE") {
 		t.Fatalf("expected REMEDIATION DIRECTIVE in reason")
 	}
 
-	// 2. Trusted workspace -> normal evaluation
+	// Command is also intercepted upfront
+	resCmd := e.EvaluateToolCall("run_command", map[string]interface{}{"CommandLine": "npm test"}, ctx)
+	if resCmd.Decision != "deny" {
+		t.Fatalf("expected deny for untrusted workspace on run_command, got %s", resCmd.Decision)
+	}
+	if resCmd.Source != "WORKSPACE-TRUST" {
+		t.Fatalf("expected WORKSPACE-TRUST source, got %s", resCmd.Source)
+	}
+
+	// 2. Trusted workspace -> normal evaluation (fast path works)
 	evaluator.GetTrustedWorkspacesHook = func() map[string]bool {
 		return map[string]bool{strings.ToLower(fakeWS): true}
 	}
-	resTrusted := e.EvaluateToolCall("run_command", map[string]interface{}{"CommandLine": "npm test"}, ctx)
-	if resTrusted.Source == "WORKSPACE-TRUST" {
-		t.Fatalf("trusted workspace should not trigger WORKSPACE-TRUST")
+	resViewTrusted := e.EvaluateToolCall("view_file", map[string]interface{}{"AbsolutePath": filepath.Join(fakeWS, "main.py")}, ctx)
+	if resViewTrusted.Decision != "allow" {
+		t.Fatalf("expected allow for trusted workspace on view_file, got %s", resViewTrusted.Decision)
+	}
+	if resViewTrusted.Source != "FAST-PATH" {
+		t.Fatalf("expected FAST-PATH source for trusted workspace, got %s", resViewTrusted.Source)
 	}
 
-	// 3. Declined workspace -> does not prompt
+	// 3. Declined workspace -> normal evaluation (fast path works)
 	evaluator.GetTrustedWorkspacesHook = func() map[string]bool { return make(map[string]bool) }
 	evaluator.GetDeclinedWorkspacesHook = func() map[string]bool {
 		return map[string]bool{strings.ToLower(fakeWS): true}
 	}
-	resDeclined := e.EvaluateToolCall("run_command", map[string]interface{}{"CommandLine": "npm test"}, ctx)
-	if resDeclined.Source == "WORKSPACE-TRUST" {
-		t.Fatalf("declined workspace should not trigger WORKSPACE-TRUST")
+	resViewDeclined := e.EvaluateToolCall("view_file", map[string]interface{}{"AbsolutePath": filepath.Join(fakeWS, "main.py")}, ctx)
+	if resViewDeclined.Decision != "allow" {
+		t.Fatalf("expected allow for declined workspace, got %s", resViewDeclined.Decision)
+	}
+	if resViewDeclined.Source != "FAST-PATH" {
+		t.Fatalf("expected FAST-PATH source for declined workspace, got %s", resViewDeclined.Source)
 	}
 
-	// 4. trust-ide command itself fast-paths
+	// 4. trust-ide command itself fast-paths as ALLOW even in untrusted workspace
 	evaluator.GetTrustedWorkspacesHook = func() map[string]bool { return make(map[string]bool) }
 	evaluator.GetDeclinedWorkspacesHook = func() map[string]bool { return make(map[string]bool) }
-	resCmd := e.EvaluateToolCall("run_command", map[string]interface{}{
+	resTrust := e.EvaluateToolCall("run_command", map[string]interface{}{
 		"CommandLine": `python -m auto_permissions.cli trust-ide --workspace "` + fakeWS + `"`,
 	}, ctx)
-	if resCmd.Decision != "allow" {
-		t.Fatalf("expected allow for trust-ide command, got %s", resCmd.Decision)
+	if resTrust.Decision != "allow" {
+		t.Fatalf("expected allow for trust-ide command, got %s", resTrust.Decision)
 	}
-	if resCmd.Source != "FAST-PATH" {
-		t.Fatalf("expected FAST-PATH for trust-ide command, got %s", resCmd.Source)
+	if resTrust.Source != "FAST-PATH" {
+		t.Fatalf("expected FAST-PATH source for trust-ide, got %s", resTrust.Source)
 	}
 }
 
