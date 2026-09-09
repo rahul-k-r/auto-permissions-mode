@@ -232,7 +232,6 @@ func GetDeclinedWorkspaces() map[string]bool {
 	return declined
 }
 
-
 // GitIndexRepairRunner hook for mocking git repair in tests
 var GitIndexRepairRunner = func(dir string) error {
 	cmd := exec.Command("git", "reset", "HEAD")
