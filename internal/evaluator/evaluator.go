@@ -119,9 +119,8 @@ var (
 	trustMutex              sync.Mutex
 
 	// Mock hooks for unit testing
-	GetTrustedWorkspacesHook   func() map[string]bool
-	GetDeclinedWorkspacesHook  func() map[string]bool
-	EnsureWorkspaceTrustedHook func(string)
+	GetTrustedWorkspacesHook  func() map[string]bool
+	GetDeclinedWorkspacesHook func() map[string]bool
 )
 
 func homeDir() string {
@@ -233,80 +232,6 @@ func GetDeclinedWorkspaces() map[string]bool {
 	return declined
 }
 
-// EnsureWorkspaceTrusted registers the workspace in trustedFolders.json and settings.json in the background without interrupting evaluation.
-func EnsureWorkspaceTrusted(targetWS string) {
-	if EnsureWorkspaceTrustedHook != nil {
-		EnsureWorkspaceTrustedHook(targetWS)
-		return
-	}
-	if targetWS == "" {
-		return
-	}
-	abs, err := filepath.Abs(targetWS)
-	if err != nil {
-		abs = targetWS
-	}
-	normWS := strings.ToLower(abs)
-	trusted := GetTrustedWorkspaces()
-	if trusted[normWS] {
-		return
-	}
-	declined := GetDeclinedWorkspaces()
-	if declined[normWS] {
-		return
-	}
-
-	home := homeDir()
-	if home == "" {
-		return
-	}
-	tfFile := filepath.Join(home, ".gemini", "trustedFolders.json")
-	_ = os.MkdirAll(filepath.Dir(tfFile), 0755)
-
-	tfData := make(map[string]string)
-	if data, err := os.ReadFile(tfFile); err == nil {
-		_ = json.Unmarshal(data, &tfData)
-	}
-	tfData[filepath.ToSlash(normWS)] = "TRUST_PARENT"
-	if out, err := json.MarshalIndent(tfData, "", "  "); err == nil {
-		_ = os.WriteFile(tfFile, out, 0644)
-	}
-
-	settingsFile := filepath.Join(home, ".gemini", "antigravity-cli", "settings.json")
-	if data, err := os.ReadFile(settingsFile); err == nil {
-		var sMap map[string]interface{}
-		if err := json.Unmarshal(data, &sMap); err == nil {
-			var twList []string
-			if rawTW, ok := sMap["trustedWorkspaces"].([]interface{}); ok {
-				for _, itm := range rawTW {
-					if s, ok := itm.(string); ok {
-						twList = append(twList, s)
-					}
-				}
-			}
-			found := false
-			for _, w := range twList {
-				if strings.EqualFold(w, abs) {
-					found = true
-					break
-				}
-			}
-			if !found {
-				twList = append(twList, abs)
-				sMap["trustedWorkspaces"] = twList
-				if out, err := json.MarshalIndent(sMap, "", "  "); err == nil {
-					_ = os.WriteFile(settingsFile, out, 0644)
-				}
-			}
-		}
-	}
-
-	trustMutex.Lock()
-	if trustedWorkspacesCache != nil {
-		trustedWorkspacesCache[normWS] = true
-	}
-	trustMutex.Unlock()
-}
 
 // GitIndexRepairRunner hook for mocking git repair in tests
 var GitIndexRepairRunner = func(dir string) error {
