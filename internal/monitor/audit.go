@@ -3,6 +3,7 @@ package monitor
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,15 +20,18 @@ var (
 
 // AuditEvent represents an entry in audit.jsonl or engine-failures.jsonl.
 type AuditEvent struct {
-	Timestamp float64                `json:"timestamp"`
-	Tool      string                 `json:"tool"`
-	Args      string                 `json:"args"`
-	Decision  string                 `json:"decision"`
-	LatencyMS float64                `json:"latency_ms"`
-	Source    string                 `json:"source"`
-	Reason    string                 `json:"reason"`
-	Project   string                 `json:"project"`
-	RawArgs   map[string]interface{} `json:"raw_args,omitempty"`
+	Timestamp      float64                `json:"timestamp"`
+	TimeStr        string                 `json:"time_str"`
+	Project        string                 `json:"project"`
+	Source         string                 `json:"source"`
+	Tool           string                 `json:"tool"`
+	ArgsSummary    string                 `json:"args_summary"`
+	Args           string                 `json:"args,omitempty"`
+	Decision       string                 `json:"decision"`
+	Reason         string                 `json:"reason"`
+	LatencyMS      float64                `json:"latency_ms"`
+	ConversationID string                 `json:"conversation_id,omitempty"`
+	RawArgs        map[string]interface{} `json:"raw_args,omitempty"`
 }
 
 func ExtractProjectName(context map[string]interface{}, toolArgs map[string]interface{}) string {
@@ -45,34 +49,60 @@ func ExtractProjectName(context map[string]interface{}, toolArgs map[string]inte
 		if cwd, ok := toolArgs["Cwd"].(string); ok && cwd != "" {
 			return filepath.Base(filepath.Clean(cwd))
 		}
+		for _, key := range []string{"TargetFile", "AbsolutePath", "SearchPath"} {
+			if p, ok := toolArgs[key].(string); ok && p != "" {
+				clean := filepath.Clean(p)
+				return filepath.Base(filepath.Dir(clean))
+			}
+		}
+		for _, key := range []string{"TargetDirectory", "DirectoryPath"} {
+			if p, ok := toolArgs[key].(string); ok && p != "" {
+				clean := filepath.Clean(p)
+				return filepath.Base(clean)
+			}
+		}
 	}
-	return "default"
+	return "workspace"
 }
 
 func SummarizeArgs(toolName string, toolArgs map[string]interface{}) string {
 	if toolArgs == nil {
 		return ""
 	}
-	if toolName == "run_command" {
-		if cmd, ok := toolArgs["CommandLine"].(string); ok {
-			return cmd
-		}
+	if cmd, ok := toolArgs["CommandLine"].(string); ok && cmd != "" {
+		return cmd
 	}
-	if strings.Contains(toolName, "file") {
-		if f, ok := toolArgs["TargetFile"].(string); ok && f != "" {
-			return f
-		}
-		if f, ok := toolArgs["AbsolutePath"].(string); ok && f != "" {
-			return f
-		}
+	if p, ok := toolArgs["AbsolutePath"].(string); ok && p != "" {
+		return filepath.Base(filepath.Clean(p))
+	}
+	if p, ok := toolArgs["TargetFile"].(string); ok && p != "" {
+		return filepath.Base(filepath.Clean(p))
+	}
+	if p, ok := toolArgs["DirectoryPath"].(string); ok && p != "" {
+		return filepath.Base(filepath.Clean(p))
+	}
+	if q, ok := toolArgs["Query"].(string); ok && q != "" {
+		return "query: " + q
+	}
+	if u, ok := toolArgs["Url"].(string); ok && u != "" {
+		return u
 	}
 	if toolName == "call_mcp_tool" {
 		s, _ := toolArgs["ServerName"].(string)
 		t, _ := toolArgs["ToolName"].(string)
-		return s + "/" + t
+		if s != "" || t != "" {
+			return s + "/" + t
+		}
 	}
-	b, _ := json.Marshal(toolArgs)
-	return string(b)
+	b, err := json.Marshal(toolArgs)
+	if err != nil {
+		return ""
+	}
+	s := string(b)
+	if len(s) <= 60 {
+		return s
+	}
+	return s[:57] + "..."
 }
 
 func TrimAuditLog(retentionDays, maxLines int, auditPath string) int {
@@ -168,18 +198,38 @@ func RecordAuditEvent(toolName string, toolArgs map[string]interface{}, decision
 
 	auditFile := filepath.Join(logDir, "audit.jsonl")
 
+	srcUpper := strings.ToUpper(source)
 	// Split telemetry: engine failure/timeout events also go to engine-failures.jsonl
-	isEngineFailure := source == "OFFLINE" || source == "TIMEOUT" || source == "ERROR"
+	isEngineFailure := srcUpper == "OFFLINE" || srcUpper == "TIMEOUT" || srcUpper == "ERROR"
+
+	now := time.Now()
+	nowUnix := float64(now.Unix())
+
+	var convID string
+	if context != nil {
+		if cid, ok := context["conversation_id"].(string); ok && cid != "" {
+			if len(cid) > 8 {
+				convID = cid[:8]
+			} else {
+				convID = cid
+			}
+		}
+	}
+
+	summary := SummarizeArgs(toolName, toolArgs)
 
 	evt := AuditEvent{
-		Timestamp: float64(time.Now().Unix()),
-		Tool:      toolName,
-		Args:      SummarizeArgs(toolName, toolArgs),
-		Decision:  decision,
-		LatencyMS: latencyMS,
-		Source:    source,
-		Reason:    reason,
-		Project:   ExtractProjectName(context, toolArgs),
+		Timestamp:      nowUnix,
+		TimeStr:        now.Format("15:04:05"),
+		Project:        ExtractProjectName(context, toolArgs),
+		Source:         srcUpper,
+		Tool:           toolName,
+		ArgsSummary:    summary,
+		Args:           summary,
+		Decision:       strings.ToUpper(decision),
+		Reason:         reason,
+		LatencyMS:      math.Round(latencyMS*10) / 10,
+		ConversationID: convID,
 	}
 
 	b, err := json.Marshal(evt)

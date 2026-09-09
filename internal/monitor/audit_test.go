@@ -19,8 +19,76 @@ func TestExtractProjectNameAndSummarize(t *testing.T) {
 	if got := monitor.ExtractProjectName(nil, map[string]interface{}{"Cwd": `C:\projects\backend`}); got != "backend" {
 		t.Fatalf("expected backend, got %s", got)
 	}
+	if got := monitor.ExtractProjectName(nil, map[string]interface{}{"TargetFile": `C:\projects\my-repo\src\main.go`}); got != "src" {
+		t.Fatalf("expected src, got %s", got)
+	}
+	if got := monitor.ExtractProjectName(nil, map[string]interface{}{"DirectoryPath": `C:\projects\my-repo`}); got != "my-repo" {
+		t.Fatalf("expected my-repo, got %s", got)
+	}
+	if got := monitor.ExtractProjectName(nil, nil); got != "workspace" {
+		t.Fatalf("expected workspace fallback, got %s", got)
+	}
+
+	// Test SummarizeArgs
 	if got := monitor.SummarizeArgs("run_command", map[string]interface{}{"CommandLine": "git status"}); got != "git status" {
 		t.Fatalf("expected git status, got %s", got)
+	}
+	if got := monitor.SummarizeArgs("view_file", map[string]interface{}{"AbsolutePath": `C:\foo\bar\main.go`}); got != "main.go" {
+		t.Fatalf("expected main.go, got %s", got)
+	}
+	if got := monitor.SummarizeArgs("write_to_file", map[string]interface{}{"TargetFile": `/home/user/code/index.ts`}); got != "index.ts" {
+		t.Fatalf("expected index.ts, got %s", got)
+	}
+	if got := monitor.SummarizeArgs("list_dir", map[string]interface{}{"DirectoryPath": `/home/user/code`}); got != "code" {
+		t.Fatalf("expected code, got %s", got)
+	}
+	if got := monitor.SummarizeArgs("grep_search", map[string]interface{}{"Query": "RecordAuditEvent"}); got != "query: RecordAuditEvent" {
+		t.Fatalf("expected query: RecordAuditEvent, got %s", got)
+	}
+	if got := monitor.SummarizeArgs("read_url_content", map[string]interface{}{"Url": "https://example.com/api"}); got != "https://example.com/api" {
+		t.Fatalf("expected url, got %s", got)
+	}
+}
+
+func TestAuditEventSerialization(t *testing.T) {
+	evt := monitor.AuditEvent{
+		Timestamp:      1788980000.5,
+		TimeStr:        "15:04:05",
+		Project:        "my-project",
+		Source:         "FAST-PATH",
+		Tool:           "run_command",
+		ArgsSummary:    "git status",
+		Args:           "git status",
+		Decision:       "ALLOW",
+		Reason:         "Safe command",
+		LatencyMS:      1.2,
+		ConversationID: "abcdef12",
+	}
+
+	b, err := json.Marshal(evt)
+	if err != nil {
+		t.Fatalf("failed to marshal AuditEvent: %v", err)
+	}
+
+	var m map[string]interface{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		t.Fatalf("failed to unmarshal JSON: %v", err)
+	}
+
+	if m["time_str"] != "15:04:05" {
+		t.Errorf("expected time_str 15:04:05, got %v", m["time_str"])
+	}
+	if m["args_summary"] != "git status" {
+		t.Errorf("expected args_summary 'git status', got %v", m["args_summary"])
+	}
+	if m["args"] != "git status" {
+		t.Errorf("expected args 'git status', got %v", m["args"])
+	}
+	if m["source"] != "FAST-PATH" {
+		t.Errorf("expected source FAST-PATH, got %v", m["source"])
+	}
+	if m["decision"] != "ALLOW" {
+		t.Errorf("expected decision ALLOW, got %v", m["decision"])
 	}
 }
 
