@@ -34,31 +34,46 @@ type AuditEvent struct {
 	RawArgs        map[string]interface{} `json:"raw_args,omitempty"`
 }
 
+func cleanBase(p string) string {
+	p = strings.TrimRight(p, `/\`)
+	if idx := strings.LastIndexAny(p, `/\`); idx != -1 {
+		return p[idx+1:]
+	}
+	return p
+}
+
+func cleanDirBase(p string) string {
+	p = strings.TrimRight(p, `/\`)
+	if idx := strings.LastIndexAny(p, `/\`); idx != -1 {
+		parent := p[:idx]
+		return cleanBase(parent)
+	}
+	return p
+}
+
 func ExtractProjectName(context map[string]interface{}, toolArgs map[string]interface{}) string {
 	if context != nil {
 		if ws, ok := context["workspace_paths"].([]string); ok && len(ws) > 0 && ws[0] != "" {
-			return filepath.Base(filepath.Clean(ws[0]))
+			return cleanBase(ws[0])
 		}
 		if wsAny, ok := context["workspace_paths"].([]interface{}); ok && len(wsAny) > 0 {
 			if s, ok := wsAny[0].(string); ok && s != "" {
-				return filepath.Base(filepath.Clean(s))
+				return cleanBase(s)
 			}
 		}
 	}
 	if toolArgs != nil {
 		if cwd, ok := toolArgs["Cwd"].(string); ok && cwd != "" {
-			return filepath.Base(filepath.Clean(cwd))
+			return cleanBase(cwd)
 		}
 		for _, key := range []string{"TargetFile", "AbsolutePath", "SearchPath"} {
 			if p, ok := toolArgs[key].(string); ok && p != "" {
-				clean := filepath.Clean(p)
-				return filepath.Base(filepath.Dir(clean))
+				return cleanDirBase(p)
 			}
 		}
 		for _, key := range []string{"TargetDirectory", "DirectoryPath"} {
 			if p, ok := toolArgs[key].(string); ok && p != "" {
-				clean := filepath.Clean(p)
-				return filepath.Base(clean)
+				return cleanBase(p)
 			}
 		}
 	}
@@ -73,13 +88,13 @@ func SummarizeArgs(toolName string, toolArgs map[string]interface{}) string {
 		return cmd
 	}
 	if p, ok := toolArgs["AbsolutePath"].(string); ok && p != "" {
-		return filepath.Base(filepath.Clean(p))
+		return cleanBase(p)
 	}
 	if p, ok := toolArgs["TargetFile"].(string); ok && p != "" {
-		return filepath.Base(filepath.Clean(p))
+		return cleanBase(p)
 	}
 	if p, ok := toolArgs["DirectoryPath"].(string); ok && p != "" {
-		return filepath.Base(filepath.Clean(p))
+		return cleanBase(p)
 	}
 	if q, ok := toolArgs["Query"].(string); ok && q != "" {
 		return "query: " + q
