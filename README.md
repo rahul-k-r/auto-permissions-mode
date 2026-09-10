@@ -52,7 +52,7 @@ flowchart TD
 ## Quick Start
 
 ### 1. Requirements
-- Python 3.9+ (Zero external dependencies; uses standard library `urllib`, `json`, and `secrets`).
+- Prebuilt standalone binary (`auto-permissions.exe` on Windows, `auto-permissions` on macOS/Linux) or Go 1.22+.
 - [`llama.cpp`](https://github.com/ggml-org/llama.cpp) (or Ollama).
 
 ---
@@ -145,10 +145,10 @@ NON_INTERACTIVE=1 VRAM=8gb ./install.sh
 Generate or refresh desktop shortcuts anytime with:
 ```powershell
 # Windows PowerShell
-& "$HOME\.gemini\antigravity\tools\auto-permissions-env\Scripts\python.exe" -m auto_permissions.cli shortcuts
+auto-permissions shortcuts
 
 # macOS / Linux
-~/.gemini/antigravity/tools/auto-permissions-env/bin/python -m auto_permissions.cli shortcuts
+auto-permissions shortcuts
 ```
 Creates:
 - `Auto Permissions Monitor.bat` (`.sh`): Double-click to stream the real-time live audit board in a dedicated terminal window.

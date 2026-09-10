@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -m auto_permissions.hook_handler",
+            "command": "auto-permissions hook",
             "timeout": 20
           }
         ]

@@ -804,7 +804,7 @@ func TestWorkspaceTrustGate(t *testing.T) {
 	evaluator.GetTrustedWorkspacesHook = func() map[string]bool { return make(map[string]bool) }
 	evaluator.GetDeclinedWorkspacesHook = func() map[string]bool { return make(map[string]bool) }
 	resTrust := e.EvaluateToolCall("run_command", map[string]interface{}{
-		"CommandLine": `python -m auto_permissions.cli trust-ide --workspace "` + fakeWS + `"`,
+		"CommandLine": `auto-permissions trust-ide --workspace "` + fakeWS + `"`,
 	}, ctx)
 	if resTrust.Decision != "allow" {
 		t.Fatalf("expected allow for trust-ide command, got %s", resTrust.Decision)

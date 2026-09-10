@@ -376,11 +376,11 @@ func (e *SecurityEvaluator) EvaluateToolCall(toolName string, toolArgs map[strin
 					alts := []Alternative{
 						{
 							Label:   fmt.Sprintf("Trust workspace '%s': enables Auto Permissions Mode to manage tool execution without redundant IDE popups", wsName),
-							Command: fmt.Sprintf("python -m auto_permissions.cli trust-ide --workspace \"%s\"", targetWS),
+							Command: fmt.Sprintf("auto-permissions trust-ide --workspace \"%s\"", targetWS),
 						},
 						{
 							Label:   "Do not trust workspace: keep manual IDE approval prompts in this workspace",
-							Command: fmt.Sprintf("python -m auto_permissions.cli trust-ide --decline --workspace \"%s\"", targetWS),
+							Command: fmt.Sprintf("auto-permissions trust-ide --decline --workspace \"%s\"", targetWS),
 						},
 					}
 					directive := BuildRemediationDirective(alts)
