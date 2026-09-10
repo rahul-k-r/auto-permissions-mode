@@ -27,12 +27,16 @@ Commands:
   hook           Execute the PreToolUse security evaluator hook (stdin -> stdout)
   install        Install hook and interactive decision rules into Antigravity
   uninstall      Remove hook and rules from Antigravity
-  trust-ide      Enable IDE wildcard trust or decline for specified workspace
+  setup          Configure hardware VRAM preset, model launcher, and optional download
+  configure      Run interactive guided setup wizard (alias: wizard)
+  shortcuts      Create or refresh one-click desktop shortcuts for Monitor and Gatekeeper
   detect         Detect GPU VRAM and hardware tier
   policy         Inspect or switch active policy mode (balanced, strict, yolo)
   monitor        Open live terminal audit dashboard showing real-time tool calls & decisions (alias: board)
   status         Show installation state and security policy status
   verify         Verify live Antigravity hook pipeline bridge
+  test           Run built-in security test cases against the active provider
+  trust-ide      Enable IDE wildcard trust or decline for specified workspace
   version        Print binary version
 `)
 }
@@ -66,6 +70,37 @@ func main() {
 		purgeFlag := uninstallCmd.Bool("purge", false, "Purge local config")
 		_ = uninstallCmd.Parse(os.Args[2:])
 		cli.UninstallHook(*globalFlag, *purgeFlag)
+	case "setup":
+		setupCmd := flag.NewFlagSet("setup", flag.ExitOnError)
+		vramFlag := setupCmd.String("vram", "", "VRAM tier (4gb, 6gb, 8gb, 12gb, 16gb, 24gb)")
+		downloadFlag := setupCmd.Bool("download", false, "Download recommended model GGUF")
+		localFlag := setupCmd.Bool("local", false, "Configure locally in .agents")
+		_ = setupCmd.Parse(os.Args[2:])
+
+		tier := *vramFlag
+		if tier == "" {
+			hw := hardware.DetectHardware()
+			tier = hw.RecommendedTier
+			if tier == "" {
+				tier = "8gb"
+			}
+		}
+		if !cli.SetupVramProfile(tier, !*localFlag, *downloadFlag) {
+			os.Exit(1)
+		}
+	case "configure", "wizard":
+		wizardCmd := flag.NewFlagSet("configure", flag.ExitOnError)
+		localFlag := wizardCmd.Bool("local", false, "Configure locally in .agents")
+		_ = wizardCmd.Parse(os.Args[2:])
+		cli.RunWizard(!*localFlag)
+	case "shortcuts":
+		if !cli.InstallDesktopShortcutsCLI() {
+			os.Exit(1)
+		}
+	case "test":
+		if !cli.RunSelfTests() {
+			os.Exit(1)
+		}
 	case "trust-ide":
 		trustCmd := flag.NewFlagSet("trust-ide", flag.ExitOnError)
 		wsFlag := trustCmd.String("workspace", "", "Target workspace path")

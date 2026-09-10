@@ -34,148 +34,71 @@ if [ ! -t 0 ]; then
     fi
 fi
 
-INSTALL_ROOT="${HOME}/.gemini/antigravity/tools"
-VENV_DIR="${INSTALL_ROOT}/auto-permissions-env"
-VENV_PYTHON="${VENV_DIR}/bin/python"
-GLOBAL_CONFIG="${HOME}/.gemini/config/auto-permissions.json"
+BIN_DIR="${HOME}/.gemini/antigravity/bin"
+INSTALLED_BIN="${BIN_DIR}/auto-permissions"
 
 # -------------------------------------------------------------
 # Handle Uninstallation
 # -------------------------------------------------------------
 if [ "$1" = "--uninstall" ] || [ "$1" = "-Uninstall" ]; then
     write_step "Uninstalling Auto Permissions Mode..."
-    if [ -x "$VENV_PYTHON" ]; then
-        "$VENV_PYTHON" -m auto_permissions.cli uninstall --global --purge
-    fi
-    if [ -d "$VENV_DIR" ]; then
-        write_step "Removing virtual environment: $VENV_DIR"
-        rm -rf "$VENV_DIR"
-        write_success "Virtual environment deleted."
+    if [ -x "${INSTALLED_BIN}" ]; then
+        "${INSTALLED_BIN}" uninstall --global --purge
+        rm -f "${INSTALLED_BIN}"
     fi
     write_success "Uninstallation complete."
     exit 0
 fi
 
 # -------------------------------------------------------------
-# 1. Discover Python Interpreter
+# 1. Acquire Native Go Binary
 # -------------------------------------------------------------
-write_step "Discovering Python interpreter..."
-PYTHON_BIN=""
+write_step "Setting up native Go binary..."
+mkdir -p "${BIN_DIR}"
 
-for cmd in python3 python; do
-    if command -v "$cmd" >/dev/null 2>&1; then
-        if "$cmd" -c "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)" 2>/dev/null; then
-            PYTHON_BIN="$(command -v "$cmd")"
-            break
-        fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
+if [ -n "$SCRIPT_DIR" ] && [ -f "${SCRIPT_DIR}/cmd/auto-permissions/main.go" ]; then
+    if command -v go >/dev/null 2>&1; then
+        echo "Building with Go compiler from local source..."
+        (cd "$SCRIPT_DIR" && go build -trimpath -ldflags="-s -w" -o "${INSTALLED_BIN}" ./cmd/auto-permissions)
+    elif [ -f "${SCRIPT_DIR}/auto-permissions" ]; then
+        cp "${SCRIPT_DIR}/auto-permissions" "${INSTALLED_BIN}"
+        chmod +x "${INSTALLED_BIN}"
+    else
+        write_err "Neither 'go' compiler nor prebuilt binary found."
+        exit 1
     fi
-done
-
-if [ -z "$PYTHON_BIN" ]; then
-    write_err "Python 3.9+ was not found on your system."
-    echo -e "${YELLOW}Please install Python 3 using your package manager:${NC}"
-    echo -e "  macOS : brew install python@3.12"
-    echo -e "  Debian/Ubuntu: sudo apt update && sudo apt install -y python3 python3-venv python3-pip"
+else
+    write_err "Please run install.sh from the repository root."
     exit 1
 fi
 
-PY_VER="$("$PYTHON_BIN" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")"
-write_success "Found Python $PY_VER ($PYTHON_BIN)"
-
-# Pre-flight check for python3-venv / ensurepip
-if ! "$PYTHON_BIN" -c "import venv, ensurepip" >/dev/null 2>&1; then
-    write_err "The 'venv' or 'ensurepip' module is missing in $PYTHON_BIN."
-    echo -e "${YELLOW}On Debian/Ubuntu systems, install the venv package:${NC}"
-    echo -e "  sudo apt update && sudo apt install -y python3-venv python3-pip"
-    exit 1
-fi
+INSTALLED_VER="$("${INSTALLED_BIN}" version 2>/dev/null || echo "installed")"
+write_success "Installed ${INSTALLED_VER}"
 
 # -------------------------------------------------------------
-# 2. Manage Isolated Virtual Environment
+# 2. Hardware Detection & Configuration
 # -------------------------------------------------------------
-write_step "Managing isolated virtual environment..."
-mkdir -p "$INSTALL_ROOT"
+write_step "Detecting system hardware..."
+"${INSTALLED_BIN}" detect
 
-NEEDS_CREATE=1
-if [ -x "$VENV_PYTHON" ]; then
-    if "$VENV_PYTHON" -c "import sys; sys.exit(0)" >/dev/null 2>&1; then
-        NEEDS_CREATE=0
-        write_success "Existing virtual environment is healthy."
-    else
-        write_warn "Existing virtual environment is corrupted. Recreating..."
-        rm -rf "$VENV_DIR"
-    fi
-fi
-
-if [ "$NEEDS_CREATE" -eq 1 ]; then
-    echo "Creating virtual environment at $VENV_DIR..."
-    "$PYTHON_BIN" -m venv "$VENV_DIR" --clear
-    write_success "Virtual environment created."
-fi
-
-# -------------------------------------------------------------
-# 3. Install Package
-# -------------------------------------------------------------
-write_step "Installing Auto Permissions Mode package..."
-SCRIPT_DIR=""
-if [ -n "${BASH_SOURCE[0]}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
-fi
-
-if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/pyproject.toml" ]; then
-    echo "Installing from local source: $SCRIPT_DIR..."
-    "$VENV_PYTHON" -m pip install --no-cache-dir "$SCRIPT_DIR" >/dev/null
+if [ "$1" = "--non-interactive" ] || [ -n "$NON_INTERACTIVE" ]; then
+    "${INSTALLED_BIN}" setup
 else
-    echo "Downloading latest release from GitHub..."
-    TEMP_ZIP="$(mktemp -t auto-permissions-XXXXXX.zip)"
-    trap 'rm -f "$TEMP_ZIP"' EXIT
-    curl -fsSL "https://github.com/rahul-k-r/auto-permissions-mode/archive/refs/heads/main.zip" -o "$TEMP_ZIP"
-    "$VENV_PYTHON" -m pip install --no-cache-dir --force-reinstall "$TEMP_ZIP" >/dev/null
-    rm -f "$TEMP_ZIP"
-    trap - EXIT
-fi
-
-INSTALLED_VER="$("$VENV_PYTHON" -m auto_permissions.cli version 2>/dev/null || echo 'v0.3.3')"
-write_success "Installed $INSTALLED_VER"
-
-# -------------------------------------------------------------
-# 4. Hardware Detection & Configuration
-# -------------------------------------------------------------
-write_step "Detecting system hardware & VRAM..."
-"$VENV_PYTHON" -m auto_permissions.cli detect
-
-if [ -z "$NON_INTERACTIVE" ]; then
-    # Interactive Onboarding Wizard
-    "$VENV_PYTHON" -m auto_permissions.cli configure --global
-else
-    # Non-interactive / Default setup
-    VRAM_TIER="${VRAM:-}"
-    if [ -z "$VRAM_TIER" ]; then
-        VRAM_TIER="$("$VENV_PYTHON" -c "import json; from auto_permissions.hardware import detect_hardware; print(detect_hardware().get('recommended_tier', '8gb'))")"
-    else
-        VRAM_TIER="$(echo "$VRAM_TIER" | tr '[:upper:]' '[:lower:]')"
-        case "$VRAM_TIER" in
-            4gb|6gb|8gb|12gb|16gb|24gb) ;;
-            *)
-                write_err "Invalid VRAM tier '$VRAM_TIER' (expected one of: 4gb, 6gb, 8gb, 12gb, 16gb, 24gb)"
-                exit 1
-                ;;
-        esac
-    fi
-    "$VENV_PYTHON" -m auto_permissions.cli setup --vram "$VRAM_TIER" --global
+    "${INSTALLED_BIN}" configure
 fi
 
 # -------------------------------------------------------------
-# 5. Hook Registration & Verification
+# 3. Register Antigravity Hook & Verify
 # -------------------------------------------------------------
 write_step "Registering Antigravity PreToolUse hook..."
-"$VENV_PYTHON" -m auto_permissions.cli install --global
+"${INSTALLED_BIN}" install --global
 
 write_step "Testing hook bridge integrity..."
-"$VENV_PYTHON" -m auto_permissions.cli verify
+"${INSTALLED_BIN}" verify
 
 echo -e "${GREEN}==============================================================="
-echo -e "  🎉 Installation & Configuration Complete!"
+echo -e "  🎉 Native Go Installation Complete!"
 echo -e "==============================================================="
 echo -e "Antigravity Surfaces Protected:"
 echo -e "  • Antigravity IDE"
@@ -184,10 +107,11 @@ echo -e "  • Antigravity VS Code Extension"
 echo -e "  • Antigravity CLI (agy)"
 echo -e ""
 echo -e "Management Commands:"
-echo -e "  Live board   : $VENV_PYTHON -m auto_permissions.cli monitor"
-echo -e "  Shortcuts    : $VENV_PYTHON -m auto_permissions.cli shortcuts"
-echo -e "  Check status : $VENV_PYTHON -m auto_permissions.cli status"
-echo -e "  Run wizard   : $VENV_PYTHON -m auto_permissions.cli configure"
-echo -e "  Run tests    : $VENV_PYTHON -m auto_permissions.cli test"
+echo -e "  Live board   : ${INSTALLED_BIN} monitor"
+echo -e "  Check status : ${INSTALLED_BIN} status"
+echo -e "  Verify hook  : ${INSTALLED_BIN} verify"
+echo -e "  Self-tests   : ${INSTALLED_BIN} test"
+echo -e "  Shortcuts    : ${INSTALLED_BIN} shortcuts"
+echo -e "  Policy mode  : ${INSTALLED_BIN} policy [balanced|strict|yolo]"
 echo -e "  Uninstall    : ./install.sh --uninstall"
 echo -e "===============================================================${NC}"

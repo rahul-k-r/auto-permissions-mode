@@ -351,3 +351,42 @@ func TestDeclineIdeWorkspaceTrust(t *testing.T) {
 		t.Fatalf("other workspace should not be declined")
 	}
 }
+
+func TestSetupVramProfile(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "cli-setup-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(tmpDir) }()
+
+	cli.GetCwdHook = func() string { return tmpDir }
+	cli.GetHomeHook = func() string { return tmpDir }
+	defer func() {
+		cli.GetCwdHook = nil
+		cli.GetHomeHook = nil
+	}()
+
+	// Test valid tier
+	if !cli.SetupVramProfile("6gb", false, false) {
+		t.Fatalf("expected SetupVramProfile to succeed for 6gb")
+	}
+
+	cfgPath := filepath.Join(tmpDir, ".agents", "auto-permissions.json")
+	data, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("expected config file to be created: %v", err)
+	}
+
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if cfg["model"] != "gemma-4-E4B-it-UD-Q4_K_XL.gguf" {
+		t.Fatalf("expected model for 6gb, got %v", cfg["model"])
+	}
+
+	// Test invalid tier
+	if cli.SetupVramProfile("invalid_tier", false, false) {
+		t.Fatalf("expected SetupVramProfile to fail for invalid tier")
+	}
+}

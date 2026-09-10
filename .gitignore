@@ -64,6 +64,7 @@ ignore/
 
 # Go build artifacts — built via CI/release workflow, never committed
 *.exe
+*.exe~
 *.dll
 /auto-permissions
 /bin/
