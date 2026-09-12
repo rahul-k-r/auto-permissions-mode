@@ -594,9 +594,16 @@ func SetupVramProfile(vramTier string, isGlobal bool, download bool) bool {
 		return false
 	}
 
+	np := 1
+	if profile.NumCtx >= 10240 {
+		np = 2
+	}
+	if profile.NumCtx >= 32768 {
+		np = 3
+	}
 	fmt.Printf("✓ Configuration saved to %s\n", configPath)
 	fmt.Printf("\n👉 Recommended llama.cpp launch command:\n")
-	fmt.Printf("   llama serve -m \"models/%s\" -c %d -ctk q4_0 -ctv q4_0 -ngl 99 --flash-attn on --port 9931\n\n", profile.Model, profile.NumCtx)
+	fmt.Printf("   llama serve -m \"models/%s\" -c %d -ctk q4_0 -ctv q4_0 -ngl 99 --flash-attn on --port 9931 -np %d -kvu\n\n", profile.Model, profile.NumCtx, np)
 	return true
 }
 

@@ -14,7 +14,7 @@ import (
 	"github.com/rahul-k-r/auto-permissions-mode/internal/policy"
 )
 
-const version = "0.4.2-go"
+const version = "0.4.3-go"
 
 func printUsage() {
 	fmt.Print(`Auto Permissions Mode (Go Native) ` + version + `

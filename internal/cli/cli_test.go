@@ -381,8 +381,11 @@ func TestSetupVramProfile(t *testing.T) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		t.Fatalf("invalid json: %v", err)
 	}
-	if cfg["model"] != "gemma-4-E4B-it-UD-Q4_K_XL.gguf" {
+	if cfg["model"] != "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf" {
 		t.Fatalf("expected model for 6gb, got %v", cfg["model"])
+	}
+	if numCtx, ok := cfg["num_ctx"].(float64); !ok || int(numCtx) != 16384 {
+		t.Fatalf("expected num_ctx 16384 for 6gb, got %v", cfg["num_ctx"])
 	}
 
 	// Test invalid tier

@@ -297,12 +297,12 @@ Configure locally in `.agents/auto-permissions.json` or globally in `~/.gemini/c
 
 See the full benchmarked hardware guide with direct Hugging Face download links in [**models/README.md**](models/README.md):
 
-- **4GB VRAM**: Gemma 4 E2B (`gemma-4-E2B-it-UD-Q3_K_XL.gguf`, 2.92 GB)
-- **6GB VRAM**: Gemma 4 E4B QAT (`gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf`, <20ms via MTP)
-- **8GB VRAM (Sweet Spot)**: Qwen 3.5 9B (`Qwen3.5-9B-UD-Q4_K_XL.gguf`, 82.7% LiveCodeBench, Vision)
-- **12GB VRAM**: Gemma 4 12B QAT (`gemma-4-12B-it-qat-UD-Q4_K_XL.gguf` + MTP)
-- **16GB VRAM**: Gemma 4 26B A4B QAT (MoE: 4B active latency with 26B reasoning)
-- **24GB+ VRAM**: Qwen 3.8 35B (`Qwen3.8-35B-UD-Q4_K_XL.gguf`) or Gemma 4 31B
+- **4GB VRAM**: Gemma 4 E4B QAT (`gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf`, <20ms via MTP, 10k context)
+- **6GB VRAM**: Gemma 4 E4B QAT (`gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf`, 16k context, dual parallel slots)
+- **8GB VRAM (Sweet Spot)**: Qwen 3.5 9B (`Qwen3.5-9B-UD-Q4_K_XL.gguf`, 82.7% LiveCodeBench, Vision, 36k multi-agent pool)
+- **12GB VRAM**: Gemma 4 12B QAT (`gemma-4-12B-it-qat-UD-Q4_K_XL.gguf` + MTP, 32k context)
+- **16GB VRAM**: Gemma 4 26B A4B QAT (MoE: 4B active latency with 26B reasoning, 32k context)
+- **24GB+ VRAM**: Qwen 3.8 35B (`Qwen3.8-35B-UD-Q4_K_XL.gguf`, 32k context)
 
 ---
 

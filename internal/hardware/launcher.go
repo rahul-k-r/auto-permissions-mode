@@ -136,15 +136,23 @@ func CreateLauncherScript(tier string, modelPath string) (string, error) {
 		exe = "auto-permissions"
 	}
 
+	np := 1
+	if profile.NumCtx >= 10240 {
+		np = 2
+	}
+	if profile.NumCtx >= 32768 {
+		np = 3
+	}
+
 	var launcherPath string
 	if runtime.GOOS == "windows" {
 		launcherPath = filepath.Join(toolsDir, "start-local-gatekeeper.bat")
 		gatekeeperContent := fmt.Sprintf(`@echo off
 title Auto Permissions Gatekeeper (Port 9931)
 echo Starting local security gatekeeper on port 9931...
-llama serve -m "%s" -c %d -ctk q4_0 -ctv q4_0 -ngl 99 --flash-attn on --port 9931
+llama serve -m "%s" -c %d -ctk q4_0 -ctv q4_0 -ngl 99 --flash-attn on --port 9931 -np %d -kvu
 pause
-`, resolvedModel, profile.NumCtx)
+`, resolvedModel, profile.NumCtx, np)
 
 		if err := os.WriteFile(launcherPath, []byte(gatekeeperContent), 0644); err != nil {
 			return "", err
@@ -161,8 +169,8 @@ pause
 		launcherPath = filepath.Join(toolsDir, "start-local-gatekeeper.sh")
 		gatekeeperContent := fmt.Sprintf(`#!/usr/bin/env bash
 echo "Starting local security gatekeeper on port 9931..."
-llama serve -m "%s" -c %d -ctk q4_0 -ctv q4_0 -ngl 99 --flash-attn on --port 9931
-`, resolvedModel, profile.NumCtx)
+llama serve -m "%s" -c %d -ctk q4_0 -ctv q4_0 -ngl 99 --flash-attn on --port 9931 -np %d -kvu
+`, resolvedModel, profile.NumCtx, np)
 
 		if err := os.WriteFile(launcherPath, []byte(gatekeeperContent), 0755); err != nil {
 			return "", err
