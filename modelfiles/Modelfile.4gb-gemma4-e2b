@@ -1,4 +1,4 @@
-FROM gemma4:e2b
-PARAMETER num_ctx 1024
+FROM gemma4:e4b
+PARAMETER num_ctx 10240
 PARAMETER temperature 0.0
 PARAMETER stop "<|im_end|>"

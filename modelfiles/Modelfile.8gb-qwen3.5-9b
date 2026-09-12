@@ -1,3 +1,3 @@
 FROM qwen3.5:9b
-PARAMETER num_ctx 8192
+PARAMETER num_ctx 36864
 PARAMETER temperature 0.0

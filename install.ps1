@@ -1,18 +1,21 @@
 <#
 .SYNOPSIS
-    Auto Permissions Mode Installer for Windows (PowerShell)
+    Auto Permissions Mode Native Go Installer for Windows (PowerShell)
 .DESCRIPTION
-    Installs Auto Permissions Mode into an isolated environment, configures hardware VRAM
-    profiles or cloud failover, and registers the global PreToolUse security hook for
-    Google Antigravity IDE, Antigravity 2.0, Antigravity VS Code Extension, and agy CLI.
+    Installs the native compiled Auto Permissions Mode security engine, configures
+    hardware VRAM profiles or cloud failover, and registers the global PreToolUse
+    security hook for Google Antigravity IDE, Antigravity 2.0, Antigravity VS Code
+    Extension, and agy CLI with ZERO Python dependencies.
 .PARAMETER Uninstall
-    Uninstalls the hook and optionally purges configuration.
+    Uninstalls the hook and purges configuration.
 .PARAMETER NonInteractive
     Runs with auto-detected defaults without interactive prompts.
 .PARAMETER Vram
     Preset VRAM tier: 4gb, 6gb, 8gb, 12gb, 16gb, 24gb. Default: auto-detected.
 .PARAMETER Download
     Automatically download the recommended GGUF model from Hugging Face.
+.PARAMETER DesktopShortcuts
+    Creates convenient one-click shortcuts on your Desktop.
 #>
 [CmdletBinding()]
 param(
@@ -25,9 +28,6 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Enforce strongest available TLS. Tls13 is not a defined enum member on older
-# .NET/PowerShell hosts and would abort the whole script under $ErrorActionPreference
-# = "Stop", so fall back to Tls12-only rather than failing the install outright.
 try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls13
 } catch {
@@ -41,32 +41,21 @@ function Write-Err { param([string]$msg) Write-Host "❌ $msg" -ForegroundColor 
 
 Write-Host @"
 ===============================================================
-       🛡️ Auto Permissions Mode - Setup & Installer
-   Autonomous Local LLM Security Gatekeeper for AI Agents
+       🛡️ Auto Permissions Mode (Native Go) - Installer
+   Zero-Latency Local LLM Security Gatekeeper for AI Agents
 ===============================================================
 "@ -ForegroundColor Blue
 
-$isPiped = [Console]::IsInputRedirected
-if ($isPiped -or $env:NON_INTERACTIVE -eq "1") {
-    $NonInteractive = $true
-}
-
-if (-not $Vram -and $env:VRAM) {
-    $Vram = $env:VRAM
-}
-
-$installRoot = Join-Path $HOME ".gemini\antigravity\tools"
-$venvDir = Join-Path $installRoot "auto-permissions-env"
-$venvPython = Join-Path $venvDir "Scripts\python.exe"
-$globalConfig = Join-Path $HOME ".gemini\config\auto-permissions.json"
+$binDir = Join-Path $HOME ".gemini\antigravity\bin"
+$installedExe = Join-Path $binDir "auto-permissions.exe"
 
 # -------------------------------------------------------------
 # Handle Uninstallation
 # -------------------------------------------------------------
 if ($Uninstall) {
     Write-Step "Uninstalling Auto Permissions Mode..."
-    if (Test-Path $venvPython) {
-        & "$venvPython" -m auto_permissions.cli uninstall --global --purge
+    if (Test-Path $installedExe) {
+        & "$installedExe" uninstall --global --purge
     } else {
         $hookFile = Join-Path $HOME ".gemini\config\hooks.json"
         if (Test-Path $hookFile) {
@@ -83,10 +72,9 @@ if ($Uninstall) {
         }
     }
 
-    if (Test-Path $venvDir) {
-        Write-Step "Removing virtual environment: $venvDir"
-        Remove-Item -Recurse -Force $venvDir -ErrorAction SilentlyContinue
-        Write-Success "Virtual environment deleted."
+    if (Test-Path $installedExe) {
+        Remove-Item -Force $installedExe -ErrorAction SilentlyContinue
+        Write-Success "Removed binary: $installedExe"
     }
 
     Write-Success "Uninstallation complete."
@@ -94,156 +82,80 @@ if ($Uninstall) {
 }
 
 # -------------------------------------------------------------
-# 1. Discover Python Interpreter
+# 1. Acquire Native Go Binary
 # -------------------------------------------------------------
-Write-Step "Discovering Python interpreter..."
-$pyExe = $null
-
-$pyLauncher = Get-Command "py.exe" -ErrorAction SilentlyContinue
-if ($pyLauncher) {
-    $testPy = & py -3 -c "import sys; print(sys.executable)" 2>$null
-    if ($testPy -and (Test-Path $testPy)) {
-        $pyExe = "py.exe"
-    }
+Write-Step "Setting up native Go binary..."
+if (-not (Test-Path $binDir)) {
+    New-Item -ItemType Directory -Path $binDir -Force | Out-Null
 }
 
-if (-not $pyExe) {
-    $candidates = Get-Command "python.exe" -All -ErrorAction SilentlyContinue | Where-Object {
-        $_.Source -notlike "*WindowsApps*"
-    }
-    foreach ($cand in $candidates) {
-        $null = & $cand.Source -c "import sys; sys.exit(0 if sys.version_info >= (3, 9) else 1)" 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            $pyExe = $cand.Source
-            break
-        }
-    }
-}
-
-if (-not $pyExe) {
-    Write-Err "Python 3.9+ was not found on your system."
-    Write-Host "Please install Python using winget:" -ForegroundColor Yellow
-    Write-Host "  winget install Python.Python.3.12" -ForegroundColor White
-    exit 1
-}
-
-$pyVersion = if ($pyExe -eq "py.exe") { & py -3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" } else { & "$pyExe" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" }
-Write-Success "Found Python $pyVersion ($pyExe)"
-
-# Pre-flight check for venv module
-$hasVenv = if ($pyExe -eq "py.exe") { & py -3 -c "import venv; print('ok')" 2>$null } else { & "$pyExe" -c "import venv; print('ok')" 2>$null }
-if ($hasVenv -ne "ok") {
-    Write-Err "The 'venv' module is missing from your Python installation."
-    exit 1
-}
-
-# -------------------------------------------------------------
-# 2. Manage Isolated Virtual Environment
-# -------------------------------------------------------------
-$installRoot = Join-Path $HOME ".gemini\antigravity\tools"
-$venvDir = Join-Path $installRoot "auto-permissions-env"
-$venvPython = Join-Path $venvDir "Scripts\python.exe"
-
-if (-not (Test-Path $installRoot)) {
-    New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
-}
-
-$needsVenv = $true
-if (Test-Path $venvPython) {
-    $venvPyVer = & "$venvPython" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
-    if ($venvPyVer -eq $pyVersion) {
-        $needsVenv = $false
-        Write-Success "Reusing existing virtual environment: $venvDir"
-    } else {
-        Write-Warn "Existing venv used Python $venvPyVer, but active is $pyVersion. Rebuilding..."
-        Remove-Item -Recurse -Force $venvDir -ErrorAction SilentlyContinue
-    }
-}
-
-if ($needsVenv) {
-    Write-Step "Creating isolated virtual environment at $venvDir..."
-    if ($pyExe -eq "py.exe") {
-        & py -3 -m venv "$venvDir"
-    } else {
-        & "$pyExe" -m venv "$venvDir"
-    }
-    if (-not (Test-Path $venvPython)) {
-        Write-Err "Failed to create virtual environment."
-        exit 1
-    }
-}
-
-# -------------------------------------------------------------
-# 3. Install Package
-# -------------------------------------------------------------
-Write-Step "Installing Auto Permissions Mode package..."
-$isLocalClone = ($PSScriptRoot) -and (Test-Path (Join-Path $PSScriptRoot "pyproject.toml"))
+$isLocalClone = ($PSScriptRoot) -and (Test-Path (Join-Path $PSScriptRoot "cmd\auto-permissions\main.go"))
 
 if ($isLocalClone) {
     Write-Host "Installing from local source: $PSScriptRoot..." -ForegroundColor DarkGray
-    & "$venvPython" -m pip install --no-cache-dir "$PSScriptRoot"
-    if ($LASTEXITCODE -ne 0) {
-        Write-Err "pip install failed with exit code $LASTEXITCODE"
+    $localBuilt = Join-Path $PSScriptRoot "auto-permissions.exe"
+    
+    $hasGo = Get-Command "go" -ErrorAction SilentlyContinue
+    if ($hasGo) {
+        Write-Host "Building with Go compiler..." -ForegroundColor DarkGray
+        Push-Location $PSScriptRoot
+        try {
+            & go build -trimpath -ldflags="-s -w" -o "$installedExe" ./cmd/auto-permissions
+            if ($LASTEXITCODE -ne 0) { throw "go build failed" }
+        } finally {
+            Pop-Location
+        }
+    } elseif (Test-Path $localBuilt) {
+        Copy-Item -Force $localBuilt $installedExe
+    } else {
+        Write-Err "Neither 'go' compiler nor prebuilt 'auto-permissions.exe' found."
         exit 1
     }
 } else {
-    Write-Host "Downloading latest release from GitHub..." -ForegroundColor DarkGray
-    $tempZip = Join-Path $env:TEMP "auto-permissions-main.zip"
-    try {
-        Invoke-RestMethod -Uri "https://github.com/rahul-k-r/auto-permissions-mode/archive/refs/heads/main.zip" -OutFile $tempZip
-        & "$venvPython" -m pip install --no-cache-dir --force-reinstall "$tempZip"
-        if ($LASTEXITCODE -ne 0) {
-            Write-Err "pip install failed with exit code $LASTEXITCODE"
-            exit 1
-        }
-    } finally {
-        if (Test-Path $tempZip) { Remove-Item -Force $tempZip -ErrorAction SilentlyContinue }
-    }
+    Write-Host "Downloading latest release binary from GitHub..." -ForegroundColor DarkGray
+    $releaseUrl = "https://github.com/rahul-k-r/auto-permissions-mode/releases/latest/download/auto-permissions-windows-amd64.exe"
+    Invoke-RestMethod -Uri $releaseUrl -OutFile $installedExe
 }
 
-$installedVer = & "$venvPython" -m auto_permissions.cli version 2>$null
+if (-not (Test-Path $installedExe)) {
+    Write-Err "Binary installation failed: $installedExe not found."
+    exit 1
+}
+
+$installedVer = & "$installedExe" version
 Write-Success "Installed $installedVer"
 
 # -------------------------------------------------------------
-# 4. Hardware Detection & Configuration
+# 2. Hardware Detection & Configuration
 # -------------------------------------------------------------
-Write-Step "Detecting system hardware & VRAM..."
-& "$venvPython" -m auto_permissions.cli detect
+Write-Step "Detecting system hardware..."
+& "$installedExe" detect
 
-if (-not $NonInteractive) {
-    # Interactive Onboarding Wizard
-    & "$venvPython" -m auto_permissions.cli configure --global
+if (-not $NonInteractive -and -not $Vram) {
+    & "$installedExe" configure
 } else {
-    # Automated / Silent Setup Mode
-    if (-not $Vram) {
-        $detectedJson = & "$venvPython" -c "import json; from auto_permissions.hardware import detect_hardware; print(json.dumps(detect_hardware()))"
-        try {
-            $parsed = $detectedJson | ConvertFrom-Json
-            $Vram = $parsed.recommended_tier
-        } catch {
-            $Vram = "8gb"
-        }
+    $setupArgs = @("setup")
+    if ($Vram) {
+        $setupArgs += @("--vram", $Vram)
     }
-    
-    $setupArgs = @("-m", "auto_permissions.cli", "setup", "--vram", $Vram, "--global")
     if ($Download) {
         $setupArgs += "--download"
     }
-    & "$venvPython" @setupArgs
+    & "$installedExe" @setupArgs
 }
 
 # -------------------------------------------------------------
-# 5. Register Antigravity Hook & Verify
+# 3. Register Antigravity Hook & Verify
 # -------------------------------------------------------------
 Write-Step "Registering Antigravity PreToolUse hook..."
-& "$venvPython" -m auto_permissions.cli install --global
+& "$installedExe" install --global
 if ($LASTEXITCODE -ne 0) {
     Write-Err "Hook registration failed with exit code $LASTEXITCODE"
     exit 1
 }
 
 Write-Step "Testing hook bridge integrity..."
-& "$venvPython" -m auto_permissions.cli verify
+& "$installedExe" verify
 if ($LASTEXITCODE -ne 0) {
     Write-Err "Hook verification failed"
     exit 1
@@ -251,12 +163,12 @@ if ($LASTEXITCODE -ne 0) {
 
 if ($DesktopShortcuts) {
     Write-Step "Creating Desktop shortcuts..."
-    & "$venvPython" -m auto_permissions.cli shortcuts
+    & "$installedExe" shortcuts
 }
 
 Write-Host @"
 ===============================================================
-  🎉 Installation & Configuration Complete!
+  🎉 Native Go Installation Complete!
 ===============================================================
 Antigravity Surfaces Protected:
   • Antigravity IDE
@@ -265,11 +177,12 @@ Antigravity Surfaces Protected:
   • Antigravity CLI (agy)
 
 Management Commands:
-  Live board   : & "$venvPython" -m auto_permissions.cli monitor
-  Shortcuts    : & "$venvPython" -m auto_permissions.cli shortcuts
-  Check status : & "$venvPython" -m auto_permissions.cli status
-  Run wizard   : & "$venvPython" -m auto_permissions.cli configure
-  Run tests    : & "$venvPython" -m auto_permissions.cli test
+  Live board   : & "$installedExe" monitor
+  Check status : & "$installedExe" status
+  Verify hook  : & "$installedExe" verify
+  Self-tests   : & "$installedExe" test
+  Shortcuts    : & "$installedExe" shortcuts
+  Policy mode  : & "$installedExe" policy [balanced|strict|yolo]
   Uninstall    : .\install.ps1 -Uninstall
 ===============================================================
 "@ -ForegroundColor Green
